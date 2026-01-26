@@ -11,9 +11,12 @@ import signal
 import logging
 from dotenv import load_dotenv
 
-from client import FeishuBot, create_client
+import lark_oapi as lark
+from lark_oapi.api.im.v1 import *
+from lark_oapi.event import *
+from lark_oapi import *
+
 from llm import init_gemini
-from bot import create_message_handler
 from utils import setup_logging
 
 
@@ -32,10 +35,9 @@ class ClawdbotApplication:
         self.logger = setup_logging(os.getenv("LOG_LEVEL", "INFO"))
         self.logger.info("正在初始化Clawdbot应用...")
         
-        self.feishu_bot = None
         self.llm_model = None
-        self.message_handler = None
         self.is_running = False
+        self.client = None
     
     def initialize(self) -> None:
         """
@@ -45,26 +47,68 @@ class ClawdbotApplication:
             Exception: 初始化失败时抛出异常
         """
         try:
-            self.logger.info("正在初始化飞书客户端...")
-            self.feishu_bot = FeishuBot()
-            self.logger.info("飞书客户端初始化成功")
-            
             self.logger.info("正在初始化Gemini模型...")
             self.llm_model = init_gemini()
             self.logger.info("Gemini模型初始化成功")
             
-            self.logger.info("正在创建消息处理器...")
-            self.message_handler = create_message_handler(
-                self.feishu_bot, 
-                self.llm_model
-            )
-            self.logger.info("消息处理器创建成功")
+            self.logger.info("正在初始化飞书长连接客户端...")
             
+            # 创建飞书长连接客户端
+            self.client = lark.Client.builder()
+                .app_id(os.getenv("FEISHU_APP_ID"))
+                .app_secret(os.getenv("FEISHU_APP_SECRET"))
+                .log_level(lark.LogLevel.INFO)
+                .build()
+            
+            self.logger.info("飞书长连接客户端初始化成功")
             self.logger.info("所有组件初始化完成")
             
         except Exception as e:
             self.logger.error(f"初始化失败: {str(e)}")
             raise
+    
+    def handle_p2_im_message_receive_v1(self, data: P2ImMessageReceiveV1) -> None:
+        """
+        处理飞书消息事件
+        
+        Args:
+            data: 飞书消息事件数据
+        """
+        try:
+            self.logger.info(f"收到飞书消息事件: {data}")
+            
+            # 获取消息内容
+            message = data.event.message
+            content = message.content
+            
+            # 解析消息内容
+            import json
+            content_json = json.loads(content)
+            user_text = content_json.get("text", "").strip()
+            
+            if not user_text:
+                return
+            
+            self.logger.info(f"用户消息: {user_text}")
+            
+            # 调用Gemini获取回复
+            response_text = self.llm_model.generate_content(user_text).text
+            self.logger.info(f"Gemini回复: {response_text}")
+            
+            # 回复消息
+            reply_request = ReplyMessageRequest.builder()
+                .message_id(message.message_id)
+                .request_body(ReplyMessageRequestBody.builder()
+                    .content(json.dumps({"text": response_text}))
+                    .msg_type("text")
+                    .build())
+                .build()
+            
+            self.client.im.v1.message.reply(reply_request)
+            self.logger.info("消息回复成功")
+            
+        except Exception as e:
+            self.logger.error(f"处理消息事件失败: {str(e)}")
     
     def start(self) -> None:
         """
@@ -74,42 +118,40 @@ class ClawdbotApplication:
             self.initialize()
             self.is_running = True
             
-            self.logger.info("正在启动飞书机器人服务...")
+            self.logger.info("正在注册事件处理器...")
             
-            # 使用简单的HTTP服务来接收飞书事件，兼容长连接模式
-            from flask import Flask, request, jsonify
+            # 创建事件处理器
+            event_handler = EventDispatcherHandler.builder(
+                os.getenv("FEISHU_ENCRYPT_KEY"),
+                os.getenv("FEISHU_VERIFICATION_TOKEN"),
+                lark.LogLevel.INFO
+            ).register_p2_im_message_receive_v1(self.handle_p2_im_message_receive_v1).build()
             
-            app = Flask(__name__)
+            # 启动长连接监听
+            self.logger.info("正在启动长连接监听...")
             
-            @app.route('/webhook/event', methods=['POST'])
-            def webhook_event():
-                """
-                处理飞书事件回调
-                """
-                try:
-                    data = request.get_json()
-                    
-                    # 处理飞书URL验证挑战
-                    if 'challenge' in data:
-                        return jsonify({'challenge': data['challenge']})
-                    
-                    # 处理消息事件
-                    event_type = data.get('header', {}).get('event_type')
-                    if event_type:
-                        self._handle_message_event(data)
-                    
-                    return jsonify({'status': 'success'})
-                except Exception as e:
-                    self.logger.error(f"处理webhook事件失败: {str(e)}")
-                    return jsonify({'status': 'error'}), 500
+            # 使用飞书SDK的长连接功能
+            from lark_oapi import ws
+            
+            # 创建长连接客户端
+            ws_client = ws.Client.builder()
+                .app_id(os.getenv("FEISHU_APP_ID"))
+                .app_secret(os.getenv("FEISHU_APP_SECRET"))
+                .event_handler(event_handler)
+                .log_level(lark.LogLevel.INFO)
+                .build()
             
             self.logger.info("Clawdbot已启动，正在监听飞书消息...")
-            self.logger.info(f"服务地址: http://0.0.0.0:8000/webhook/event")
             self.logger.info("按Ctrl+C可停止服务")
             
-            # 启动Flask服务
-            app.run(host="0.0.0.0", port=8000, debug=False)
+            # 启动长连接客户端
+            ws_client.start()
             
+            # 保持程序运行
+            while self.is_running:
+                import time
+                time.sleep(1)
+                
         except KeyboardInterrupt:
             self.logger.info("收到停止信号，正在退出...")
             self.stop()
@@ -117,33 +159,6 @@ class ClawdbotApplication:
             self.logger.error(f"运行时发生错误: {str(e)}")
             self.stop()
             raise
-    
-    def _handle_message_event(self, event_data: dict) -> None:
-        """
-        处理飞书消息事件
-        
-        Args:
-            event_data: 飞书推送的事件数据
-        """
-        try:
-            # 处理飞书webhook事件格式
-            event_type = event_data.get('header', {}).get('event_type', '')
-            event_body = event_data.get('event', {})
-            
-            self.logger.info(f"收到事件: {event_type}")
-            
-            if self.message_handler:
-                # 构造兼容原message_handler的事件数据格式
-                compatible_data = {
-                    "event": event_body,
-                    "type": event_type
-                }
-                self.message_handler.handle_message(event_type, compatible_data)
-            else:
-                self.logger.warning("消息处理器未初始化，无法处理消息")
-                
-        except Exception as e:
-            self.logger.error(f"处理消息事件失败: {str(e)}")
     
     def stop(self) -> None:
         """
