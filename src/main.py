@@ -64,17 +64,17 @@ class ClawdbotApplication:
             self.logger.error(f"初始化失败: {str(e)}")
             raise
     
-    def handle_message(self, message: dict) -> None:
+    def handle_message(self, message) -> None:
         """
         统一处理消息逻辑
         
         Args:
-            message: 消息对象
+            message: 消息对象（EventMessage类型）
         """
         try:
             # 消息去重检查
-            if 'message_id' in message:
-                message_id = message['message_id']
+            if hasattr(message, 'message_id') and message.message_id:
+                message_id = message.message_id
                 if message_id in self.processed_messages:
                     self.logger.info(f"消息 {message_id} 已处理，跳过重复处理")
                     return
@@ -82,7 +82,7 @@ class ClawdbotApplication:
             
             # 解析消息内容
             import json
-            content_json = json.loads(message['content'])
+            content_json = json.loads(message.content)
             user_text = content_json.get("text", "").strip()
             
             if not user_text:
@@ -90,7 +90,7 @@ class ClawdbotApplication:
                 return
             
             # 群聊消息需要移除@机器人的部分
-            if message['chat_type'] == "group":
+            if message.chat_type == "group":
                 # 移除@机器人的标记
                 import re
                 user_text = re.sub(r"@_user_\d+", "", user_text).strip()
@@ -98,7 +98,7 @@ class ClawdbotApplication:
                     self.logger.info("群聊消息仅包含@机器人标记，跳过处理")
                     return
             
-            self.logger.info(f"用户消息: {user_text}, 消息类型: {message['message_type']}, 聊天类型: {message['chat_type']}")
+            self.logger.info(f"用户消息: {user_text}, 消息类型: {message.message_type}, 聊天类型: {message.chat_type}")
             
             # 默认使用OpenCode
             self.logger.info("默认调用OpenCode")
@@ -117,7 +117,7 @@ class ClawdbotApplication:
                 self.logger.info(f"Gemini回复: {response_text}")
             
             # 回复消息
-            self.reply_message(message['message_id'], response_text, message['chat_type'] == "group")
+            self.reply_message(message.message_id, response_text, message.chat_type == "group")
             
         except Exception as e:
             self.logger.error(f"处理消息失败: {str(e)}")
