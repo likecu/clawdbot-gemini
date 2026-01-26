@@ -74,20 +74,42 @@ class ClawdbotApplication:
             self.initialize()
             self.is_running = True
             
-            self.logger.info("正在启动飞书长连接客户端...")
+            self.logger.info("正在启动飞书机器人服务...")
             
-            self.feishu_bot.client.im.v1.event.listen(
-                event_type="im.message.message_v1",
-                handler=self._handle_message_event
-            )
+            # 使用简单的HTTP服务来接收飞书事件，兼容长连接模式
+            from flask import Flask, request, jsonify
+            
+            app = Flask(__name__)
+            
+            @app.route('/webhook/event', methods=['POST'])
+            def webhook_event():
+                """
+                处理飞书事件回调
+                """
+                try:
+                    data = request.get_json()
+                    
+                    # 处理飞书URL验证挑战
+                    if 'challenge' in data:
+                        return jsonify({'challenge': data['challenge']})
+                    
+                    # 处理消息事件
+                    event_type = data.get('header', {}).get('event_type')
+                    if event_type:
+                        self._handle_message_event(data)
+                    
+                    return jsonify({'status': 'success'})
+                except Exception as e:
+                    self.logger.error(f"处理webhook事件失败: {str(e)}")
+                    return jsonify({'status': 'error'}), 500
             
             self.logger.info("Clawdbot已启动，正在监听飞书消息...")
+            self.logger.info(f"服务地址: http://0.0.0.0:8000/webhook/event")
             self.logger.info("按Ctrl+C可停止服务")
             
-            while self.is_running:
-                import time
-                time.sleep(1)
-                
+            # 启动Flask服务
+            app.run(host="0.0.0.0", port=8000, debug=False)
+            
         except KeyboardInterrupt:
             self.logger.info("收到停止信号，正在退出...")
             self.stop()
@@ -104,11 +126,19 @@ class ClawdbotApplication:
             event_data: 飞书推送的事件数据
         """
         try:
-            event_type = event_data.get("type", "")
+            # 处理飞书webhook事件格式
+            event_type = event_data.get('header', {}).get('event_type', '')
+            event_body = event_data.get('event', {})
+            
             self.logger.info(f"收到事件: {event_type}")
             
             if self.message_handler:
-                self.message_handler.handle_message(event_type, event_data)
+                # 构造兼容原message_handler的事件数据格式
+                compatible_data = {
+                    "event": event_body,
+                    "type": event_type
+                }
+                self.message_handler.handle_message(event_type, compatible_data)
             else:
                 self.logger.warning("消息处理器未初始化，无法处理消息")
                 
