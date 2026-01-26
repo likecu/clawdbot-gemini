@@ -12,7 +12,6 @@ import logging
 from dotenv import load_dotenv
 
 import lark_oapi as lark
-from lark_oapi.api.im.v1 import *
 from lark_oapi.event import *
 from lark_oapi import *
 
@@ -63,42 +62,138 @@ class ClawdbotApplication:
             self.logger.error(f"初始化失败: {str(e)}")
             raise
     
-    def handle_p2_im_message_receive_v1(self, data: P2ImMessageReceiveV1) -> None:
+    def handle_message(self, message: dict) -> None:
         """
-        处理飞书消息事件
+        统一处理消息逻辑
         
         Args:
-            data: 飞书消息事件数据
+            message: 消息对象
         """
         try:
-            self.logger.info(f"收到飞书消息事件: {data}")
-            
-            # 获取消息内容
-            message = data.event.message
-            content = message.content
-            
             # 解析消息内容
             import json
-            content_json = json.loads(content)
+            content_json = json.loads(message.content)
             user_text = content_json.get("text", "").strip()
             
             if not user_text:
+                self.logger.info("收到空消息，跳过处理")
                 return
             
-            self.logger.info(f"用户消息: {user_text}")
+            # 群聊消息需要移除@机器人的部分
+            if message.chat_type == "group":
+                # 移除@机器人的标记
+                import re
+                user_text = re.sub(r"@_user_\d+", "", user_text).strip()
+                if not user_text:
+                    self.logger.info("群聊消息仅包含@机器人标记，跳过处理")
+                    return
+            
+            self.logger.info(f"用户消息: {user_text}, 消息类型: {message.message_type}, 聊天类型: {message.chat_type}")
             
             # 调用Gemini获取回复
-            response_text = self.llm_model.generate_content(user_text).text
+            response = self.llm_model.generate_content(user_text)
+            response_text = response.text
             self.logger.info(f"Gemini回复: {response_text}")
             
             # 回复消息
-            reply_request = ReplyMessageRequest.builder().message_id(message.message_id).request_body(ReplyMessageRequestBody.builder().content(json.dumps({"text": response_text})).msg_type("text").build()).build()
-            
-            self.client.im.v1.message.reply(reply_request)
-            self.logger.info("消息回复成功")
+            self.reply_message(message.message_id, response_text, message.chat_type == "group")
             
         except Exception as e:
-            self.logger.error(f"处理消息事件失败: {str(e)}")
+            self.logger.error(f"处理消息失败: {str(e)}")
+    
+    def reply_message(self, message_id: str, content: str, is_group: bool = False, reply_in_thread: bool = False) -> None:
+        """
+        回复飞书消息
+        
+        Args:
+            message_id: 消息ID
+            content: 回复内容
+            is_group: 是否为群聊消息
+            reply_in_thread: 是否以话题形式回复
+        """
+        try:
+            import json
+            import uuid
+            
+            # 构建回复请求
+            reply_request = ReplyMessageRequest.builder().message_id(message_id).request_body(ReplyMessageRequestBody.builder().content(json.dumps({"text": content})).msg_type("text").reply_in_thread(reply_in_thread).uuid(str(uuid.uuid4())).build()).build()
+            
+            # 发送回复
+            response = self.client.im.v1.message.reply(reply_request)
+            if response.code == 0:
+                self.logger.info(f"消息回复成功，回复消息ID: {response.data.message_id}")
+            else:
+                self.logger.error(f"消息回复失败，错误码: {response.code}, 错误信息: {response.msg}")
+                
+        except Exception as e:
+            self.logger.error(f"回复消息失败: {str(e)}")
+    
+    def send_message(self, receive_id: str, receive_id_type: str, content: str, msg_type: str = "text") -> str:
+        """
+        主动发送消息
+        
+        Args:
+            receive_id: 接收者ID
+            receive_id_type: 接收者类型 (open_id/union_id/user_id/email/chat_id)
+            content: 消息内容
+            msg_type: 消息类型
+            
+        Returns:
+            str: 发送成功返回消息ID，失败返回空字符串
+        """
+        try:
+            import json
+            import uuid
+            
+            # 构建发送请求
+            create_message_request = CreateMessageRequest.builder().receive_id_type(receive_id_type).request_body(CreateMessageRequestBody.builder().receive_id(receive_id).msg_type(msg_type).content(json.dumps({"text": content})).uuid(str(uuid.uuid4())).build()).build()
+            
+            # 发送消息
+            response = self.client.im.v1.message.create(create_message_request)
+            if response.code == 0:
+                self.logger.info(f"消息发送成功，消息ID: {response.data.message_id}")
+                return response.data.message_id
+            else:
+                self.logger.error(f"消息发送失败，错误码: {response.code}, 错误信息: {response.msg}")
+                return ""
+                
+        except Exception as e:
+            self.logger.error(f"发送消息失败: {str(e)}")
+            return ""
+    
+    def handle_p2_im_message_receive_v1(self, data: dict) -> None:
+        """
+        处理飞书单聊消息事件
+        
+        Args:
+            data: 飞书单聊消息事件数据
+        """
+        try:
+            self.logger.info(f"收到单聊消息事件: {data}")
+            
+            # 获取消息内容
+            message = data.event.message
+            self.handle_message(message)
+            
+        except Exception as e:
+            self.logger.error(f"处理单聊消息事件失败: {str(e)}")
+    
+    def handle_group_at_message_receive_v1(self, data) -> None:
+        """
+        处理飞书群聊@机器人消息事件
+        
+        Args:
+            data: 飞书群聊@机器人消息事件数据
+        """
+        try:
+            self.logger.info(f"收到群聊@机器人消息事件: {data}")
+            
+            # 获取消息内容
+            message = data.event.message
+            self.handle_message(message)
+            
+        except Exception as e:
+            self.logger.error(f"处理群聊@机器人消息事件失败: {str(e)}")
     
     def start(self) -> None:
         """
@@ -115,7 +210,13 @@ class ClawdbotApplication:
                 os.getenv("FEISHU_ENCRYPT_KEY"),
                 os.getenv("FEISHU_VERIFICATION_TOKEN"),
                 lark.LogLevel.INFO
-            ).register_p2_im_message_receive_v1(self.handle_p2_im_message_receive_v1).build()
+            )
+            
+            # 注册单聊消息处理器
+            event_handler = event_handler.register_p2_im_message_receive_v1(self.handle_p2_im_message_receive_v1)
+            
+            # 构建事件处理器
+            event_handler = event_handler.build()
             
             # 启动长连接监听
             self.logger.info("正在启动长连接监听...")
