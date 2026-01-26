@@ -1,0 +1,9 @@
+.env
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+.dockerignore
+.git/
+*.log
+.DS_Store

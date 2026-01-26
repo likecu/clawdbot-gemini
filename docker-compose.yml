@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  clawdbot:
+    build: .
+    container_name: clawdbot_gemini
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "8125:8000"
+    volumes:
+      - ./logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
