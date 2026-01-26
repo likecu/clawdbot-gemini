@@ -40,9 +40,9 @@ app.get('/v1/models', async (req, res) => {
   res.json({
     object: 'list',
     data: [
-      { id: 'gemini-1.5-pro', object: 'model', created: Date.now() / 1000, owned_by: 'google' },
-      { id: 'gemini-1.5-flash', object: 'model', created: Date.now() / 1000, owned_by: 'google' },
-      { id: 'gemma-3-27b-it', object: 'model', created: Date.now() / 1000, owned_by: 'google' },
+      { id: 'gemini-2.5-flash', object: 'model', created: Date.now() / 1000, owned_by: 'google' },
+      { id: 'gemini-2.5-pro', object: 'model', created: Date.now() / 1000, owned_by: 'google' },
+      { id: 'gemini-2.0-flash', object: 'model', created: Date.now() / 1000, owned_by: 'google' },
     ],
   });
 });
@@ -51,13 +51,13 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const { model, messages, temperature, max_tokens } = req.body;
     
-    const modelName = model || 'gemini-1.5-flash';
+    const modelName = model || 'gemini-2.5-flash';
     
     let geminiModel;
     try {
       geminiModel = genAI.getGenerativeModel({ model: modelName });
     } catch (modelError) {
-      geminiModel = genAI.getGenerativeModel({ model: 'gemini-pro' });
+      geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
     }
 
     const lastMessage = messages[messages.length - 1];
