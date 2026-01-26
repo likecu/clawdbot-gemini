@@ -4,7 +4,7 @@ Gemini API接口封装模块
 提供与Google Gemini模型交互的功能，包括初始化、生成内容等操作
 """
 
-import google.generativeai as genai
+import google.genai as genai
 from typing import Optional, Any
 import os
 
@@ -29,8 +29,11 @@ def init_gemini(api_key: Optional[str] = None, model: str = "gemma-3-27b-it") ->
     if not api_key:
         raise ValueError("Google API Key未配置，请设置GOOGLE_API_KEY环境变量或传入api_key参数")
     
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(model)
+    # 创建客户端
+    client = genai.GenerativeAI(api_key=api_key)
+    
+    # 创建模型实例
+    return client
 
 
 def get_response(model: Any, user_message: str) -> str:
@@ -48,8 +51,12 @@ def get_response(model: Any, user_message: str) -> str:
         Exception: API调用失败时抛出异常，包含错误信息
     """
     try:
-        response = model.generate_content(user_message)
-        return response.text
+        # 创建聊天
+        chat = model.chats.create(
+            model="gemma-3-27b-it",
+            messages=[{"role": "user", "parts": [user_message]}]
+        )
+        return chat.last.text
     except Exception as e:
         raise Exception(f"Gemini API调用失败: {str(e)}")
 
@@ -72,7 +79,13 @@ def get_response_with_history(model: Any,
         Exception: API调用失败时抛出异常
     """
     try:
-        chat = model.start_chat(history=history or [])
+        # 创建聊天
+        chat = model.chats.create(
+            model="gemma-3-27b-it",
+            messages=history or []
+        )
+        
+        # 发送消息
         response = chat.send_message(user_message)
         return response.text
     except Exception as e:
