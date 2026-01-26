@@ -50,13 +50,13 @@ class OpenCodeClient:
                 raise RuntimeError(f"请求过于频繁，请等待 {self.request_interval - elapsed:.2f} 秒")
         self.last_request_time = datetime.now()
     
-    def chat(self, message: str, model: str = "gemini-1.5-pro") -> str:
+    def chat(self, message: str, model: str = "deepseek/deepseek-r1") -> str:
         """
         发送消息并获取回复
         
         Args:
             message: 用户发送的消息内容
-            model: 使用的模型名称，默认gemini-1.5-pro
+            model: 使用的模型名称，默认deepseek/deepseek-r1 (通过OpenRouter)
             
         Returns:
             str: OpenCode服务生成的回复文本

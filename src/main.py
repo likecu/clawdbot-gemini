@@ -20,7 +20,7 @@ from lark_oapi.api.im.v1 import (
     CreateMessageRequest, CreateMessageRequestBody
 )
 
-from llm import init_gemini, get_response as get_gemini_response
+from llm import init_llm, get_llm_response, init_gemini, get_response as get_gemini_response
 from opencode import init_opencode, get_response as get_opencode_response
 from openrouter import init_openrouter, get_response as get_openrouter_response
 from utils import setup_logging
@@ -47,7 +47,7 @@ class ClawdbotApplication:
         self.is_running = False
         self.client = None
         self.processed_messages = set()  # 用于消息去重
-        self.active_model = os.getenv("ACTIVE_MODEL", "openrouter")  # 可选值: gemini/opencode/openrouter
+        self.active_model = os.getenv("ACTIVE_MODEL", "gemini")  # 可选值: gemini/opencode/openrouter
     
     def initialize(self) -> None:
         """
@@ -59,13 +59,19 @@ class ClawdbotApplication:
         try:
             self.logger.info(f"正在使用模型: {self.active_model}")
             
-            self.logger.info("正在初始化Gemini模型...")
-            self.llm_model = init_gemini()
-            self.logger.info("Gemini模型初始化成功")
-            
-            self.logger.info("正在初始化OpenRouter客户端...")
-            self.openrouter_client = init_openrouter()
-            self.logger.info("OpenRouter客户端初始化成功")
+            # 只有在使用Gemini时才初始化
+            if self.active_model == "gemini":
+                self.logger.info("正在初始化Gemini模型...")
+                self.llm_model = init_gemini()
+                self.logger.info("Gemini模型初始化成功")
+            elif self.active_model == "openrouter":
+                self.logger.info("正在初始化OpenRouter客户端...")
+                self.openrouter_client = init_openrouter()
+                self.logger.info("OpenRouter客户端初始化成功")
+            elif self.active_model == "opencode":
+                self.logger.info("正在初始化OpenCode客户端...")
+                self.opencode_client = init_opencode()
+                self.logger.info("OpenCode客户端初始化成功")
             
             self.logger.info("正在初始化飞书长连接客户端...")
             
