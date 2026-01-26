@@ -5,7 +5,7 @@ Gemini API接口封装模块
 """
 
 import google.generativeai as genai
-from typing import Optional
+from typing import Optional, Any
 import os
 
 
