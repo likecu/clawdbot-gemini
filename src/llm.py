@@ -30,9 +30,8 @@ def init_gemini(api_key: Optional[str] = None, model: str = "gemma-3-27b-it") ->
         raise ValueError("Google API Key未配置，请设置GOOGLE_API_KEY环境变量或传入api_key参数")
     
     # 创建客户端
-    client = genai.GenerativeAI(api_key=api_key)
+    client = genai.Client(api_key=api_key)
     
-    # 创建模型实例
     return client
 
 
