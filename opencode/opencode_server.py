@@ -19,8 +19,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-# 导入代码执行模块
-from executor import CodeExecutor
+from src.executor import CodeExecutor
 
 # 加载环境变量
 load_dotenv()
