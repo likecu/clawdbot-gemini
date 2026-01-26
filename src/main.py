@@ -135,7 +135,7 @@ class ClawdbotApplication:
             self.logger.info("按Ctrl+C可停止服务")
             
             # 启动长连接客户端
-            ws_client.run()
+            ws_client.start()
             
             # 保持程序运行
             while self.is_running:
