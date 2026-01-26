@@ -1,7 +1,7 @@
 {
   "name": "opencode-api-server",
-  "version": "1.0.0",
-  "description": "OpenAI Compatible API Server using Google Gemini and OpenRouter",
+  "version": "2.0.0",
+  "description": "OpenAI Compatible API Server with MCP Support",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.1.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "express": "^4.18.0",
     "cors": "^2.8.5",
     "dotenv": "^16.0.0",
