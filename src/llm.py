@@ -9,7 +9,7 @@ from typing import Optional, Any
 import os
 
 
-def init_gemini(api_key: Optional[str] = None, model: str = "gemini-1.5-pro-latest") -> Any:
+def init_gemini(api_key: Optional[str] = None, model: str = "gemma-3-27b") -> Any:
     """
     初始化Gemini模型
 
