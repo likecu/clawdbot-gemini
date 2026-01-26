@@ -142,19 +142,44 @@ class CodeExecutor:
         """
         # 检测是否需要执行代码
         execution_keywords = [
+            # 中文关键词
             '运行代码',
             '执行代码',
             '运行这段代码',
+            '执行这段代码',
+            '帮我运行',
+            '帮我执行',
+            '代码执行',
+            '运行 python',
+            '运行py',
+            '执行 python',
+            '执行py',
+            '获取内存',
+            '内存使用',
+            '查看内存',
+            'cpu',
+            '获取系统信息',
+            '系统监控',
+            '执行结果',
+            '直接运行',
+            '代码结果',
+            # 英文关键词
             'execute this code',
             'run this code',
-            '帮我运行',
-            '代码执行',
             'run python',
-            '运行 python',
-            'execute python'
+            'execute python',
+            'run code',
+            'execute code',
+            'get memory',
+            'memory usage',
+            'system info',
+            'show me the result',
+            'give me the output',
+            'run it'
         ]
 
-        should_execute = any(keyword in user_message for keyword in execution_keywords)
+        user_message_lower = user_message.lower()
+        should_execute = any(keyword.lower() in user_message_lower for keyword in execution_keywords)
 
         if not should_execute:
             return False, None
