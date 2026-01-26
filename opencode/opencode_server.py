@@ -254,7 +254,7 @@ def create_chat_completion():
             assistant_response = f"我已经帮您执行了代码，结果如下：\n\n{code_result}"
         else:
             # 调用 Gemini 生成回复
-            from llm import get_response_with_history
+            from src.llm import get_response_with_history
 
             gemini_model = executor.get_gemini_model()
             response_text = get_response_with_history(
