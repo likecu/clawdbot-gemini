@@ -54,11 +54,7 @@ class ClawdbotApplication:
             self.logger.info("正在初始化飞书长连接客户端...")
             
             # 创建飞书长连接客户端
-            self.client = lark.Client.builder()
-                .app_id(os.getenv("FEISHU_APP_ID"))
-                .app_secret(os.getenv("FEISHU_APP_SECRET"))
-                .log_level(lark.LogLevel.INFO)
-                .build()
+            self.client = lark.Client.builder().app_id(os.getenv("FEISHU_APP_ID")).app_secret(os.getenv("FEISHU_APP_SECRET")).log_level(lark.LogLevel.INFO).build()
             
             self.logger.info("飞书长连接客户端初始化成功")
             self.logger.info("所有组件初始化完成")
@@ -134,12 +130,7 @@ class ClawdbotApplication:
             from lark_oapi import ws
             
             # 创建长连接客户端
-            ws_client = ws.Client.builder()
-                .app_id(os.getenv("FEISHU_APP_ID"))
-                .app_secret(os.getenv("FEISHU_APP_SECRET"))
-                .event_handler(event_handler)
-                .log_level(lark.LogLevel.INFO)
-                .build()
+            ws_client = ws.Client.builder().app_id(os.getenv("FEISHU_APP_ID")).app_secret(os.getenv("FEISHU_APP_SECRET")).event_handler(event_handler).log_level(lark.LogLevel.INFO).build()
             
             self.logger.info("Clawdbot已启动，正在监听飞书消息...")
             self.logger.info("按Ctrl+C可停止服务")
