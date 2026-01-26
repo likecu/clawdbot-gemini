@@ -11,8 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY opencode_requirements.txt .
 RUN pip install --no-cache-dir -r opencode_requirements.txt
 
-COPY opencode/src/ ./src/
-COPY opencode_server.py .
+COPY src/ ./src/
+COPY ../opencode_server.py .
 
 ENV PYTHONUNBUFFERED=1
 
