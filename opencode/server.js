@@ -50,8 +50,15 @@ app.get('/v1/models', async (req, res) => {
 app.post('/v1/chat/completions', async (req, res) => {
   try {
     const { model, messages, temperature, max_tokens } = req.body;
-
-    const geminiModel = genAI.getGenerativeModel({ model: model || 'gemini-1.5-pro' });
+    
+    const modelName = model || 'gemini-1.5-flash';
+    
+    let geminiModel;
+    try {
+      geminiModel = genAI.getGenerativeModel({ model: modelName });
+    } catch (modelError) {
+      geminiModel = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    }
 
     const lastMessage = messages[messages.length - 1];
     const prompt = typeof lastMessage.content === 'string' 
