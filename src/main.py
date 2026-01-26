@@ -124,13 +124,18 @@ class ClawdbotApplication:
             from lark_oapi import ws
             
             # 创建长连接客户端
-            ws_client = ws.Client.builder().app_id(os.getenv("FEISHU_APP_ID")).app_secret(os.getenv("FEISHU_APP_SECRET")).event_handler(event_handler).log_level(lark.LogLevel.INFO).build()
+            ws_client = ws.Client(
+                app_id=os.getenv("FEISHU_APP_ID"),
+                app_secret=os.getenv("FEISHU_APP_SECRET"),
+                event_handler=event_handler,
+                log_level=lark.LogLevel.INFO
+            )
             
             self.logger.info("Clawdbot已启动，正在监听飞书消息...")
             self.logger.info("按Ctrl+C可停止服务")
             
             # 启动长连接客户端
-            ws_client.start()
+            ws_client.run()
             
             # 保持程序运行
             while self.is_running:
