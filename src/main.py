@@ -92,13 +92,7 @@ class ClawdbotApplication:
             self.logger.info(f"Gemini回复: {response_text}")
             
             # 回复消息
-            reply_request = ReplyMessageRequest.builder()
-                .message_id(message.message_id)
-                .request_body(ReplyMessageRequestBody.builder()
-                    .content(json.dumps({"text": response_text}))
-                    .msg_type("text")
-                    .build())
-                .build()
+            reply_request = ReplyMessageRequest.builder().message_id(message.message_id).request_body(ReplyMessageRequestBody.builder().content(json.dumps({"text": response_text})).msg_type("text").build()).build()
             
             self.client.im.v1.message.reply(reply_request)
             self.logger.info("消息回复成功")
