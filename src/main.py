@@ -22,6 +22,7 @@ from lark_oapi.api.im.v1 import (
 
 from llm import init_gemini, get_response as get_gemini_response
 from opencode import init_opencode, get_response as get_opencode_response
+from openrouter import init_openrouter, get_response as get_openrouter_response
 from utils import setup_logging
 
 
@@ -41,9 +42,12 @@ class ClawdbotApplication:
         self.logger.info("正在初始化Clawdbot应用...")
         
         self.llm_model = None
+        self.openrouter_client = None
+        self.opencode_client = None
         self.is_running = False
         self.client = None
         self.processed_messages = set()  # 用于消息去重
+        self.active_model = os.getenv("ACTIVE_MODEL", "openrouter")  # 可选值: gemini/opencode/openrouter
     
     def initialize(self) -> None:
         """
@@ -53,9 +57,15 @@ class ClawdbotApplication:
             Exception: 初始化失败时抛出异常
         """
         try:
+            self.logger.info(f"正在使用模型: {self.active_model}")
+            
             self.logger.info("正在初始化Gemini模型...")
             self.llm_model = init_gemini()
             self.logger.info("Gemini模型初始化成功")
+            
+            self.logger.info("正在初始化OpenRouter客户端...")
+            self.openrouter_client = init_openrouter()
+            self.logger.info("OpenRouter客户端初始化成功")
             
             self.logger.info("正在初始化飞书长连接客户端...")
             
@@ -105,20 +115,37 @@ class ClawdbotApplication:
             
             self.logger.info(f"用户消息: {user_text}, 消息类型: {message.message_type}, 聊天类型: {message.chat_type}")
             
-            # 默认使用OpenCode
-            self.logger.info("默认调用OpenCode")
-            try:
-                # 初始化OpenCode
-                opencode_client = init_opencode()
-                # 获取OpenCode回复
-                response_text = get_opencode_response(opencode_client, user_text)
-                self.logger.info(f"OpenCode回复: {response_text}")
-            except Exception as e:
-                self.logger.error(f"OpenCode调用失败: {str(e)}")
-                # 失败时回退到Gemini
-                self.logger.info("OpenCode调用失败，回退到Gemini")
-                response_text = get_gemini_response(self.llm_model, user_text)
-                self.logger.info(f"Gemini回复: {response_text}")
+            # 根据配置的模型选择对应的服务
+            if self.active_model == "gemini":
+                self.logger.info("调用Gemini模型")
+                try:
+                    response_text = get_gemini_response(self.llm_model, user_text)
+                    self.logger.info(f"Gemini回复: {response_text}")
+                except Exception as e:
+                    self.logger.error(f"Gemini调用失败: {str(e)}")
+                    raise
+            
+            elif self.active_model == "openrouter":
+                self.logger.info("调用OpenRouter (deepseek/deepseek-r1)")
+                try:
+                    response_text = get_openrouter_response(self.openrouter_client, user_text)
+                    self.logger.info(f"OpenRouter回复: {response_text}")
+                except Exception as e:
+                    self.logger.error(f"OpenRouter调用失败: {str(e)}")
+                    self.logger.info("OpenRouter调用失败，回退到Gemini")
+                    response_text = get_gemini_response(self.llm_model, user_text)
+                    self.logger.info(f"Gemini回复: {response_text}")
+            
+            else:
+                self.logger.info("调用OpenCode")
+                try:
+                    response_text = get_opencode_response(self.opencode_client or init_opencode(), user_text)
+                    self.logger.info(f"OpenCode回复: {response_text}")
+                except Exception as e:
+                    self.logger.error(f"OpenCode调用失败: {str(e)}")
+                    self.logger.info("OpenCode调用失败，回退到Gemini")
+                    response_text = get_gemini_response(self.llm_model, user_text)
+                    self.logger.info(f"Gemini回复: {response_text}")
             
             # 回复消息
             self.reply_message(message.message_id, response_text, message.chat_type == "group")
