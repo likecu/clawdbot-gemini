@@ -5,7 +5,7 @@ Gemini API接口封装模块
 """
 
 import google.genai as genai
-from typing import Optional, Any
+from typing import Optional, Any, List, Dict
 import os
 
 
@@ -29,7 +29,6 @@ def init_gemini(api_key: Optional[str] = None, model: str = "gemma-3-27b-it") ->
     if not api_key:
         raise ValueError("Google API Key未配置，请设置GOOGLE_API_KEY环境变量或传入api_key参数")
     
-    # 创建客户端
     client = genai.Client(api_key=api_key)
     
     return client
@@ -50,19 +49,18 @@ def get_response(model: Any, user_message: str) -> str:
         Exception: API调用失败时抛出异常，包含错误信息
     """
     try:
-        # 创建聊天
-        chat = model.chats.create(
+        response = model.models.generate_content(
             model="gemma-3-27b-it",
-            messages=[{"role": "user", "parts": [user_message]}]
+            contents=user_message
         )
-        return chat.last.text
+        return response.text
     except Exception as e:
         raise Exception(f"Gemini API调用失败: {str(e)}")
 
 
 def get_response_with_history(model: Any, 
                               user_message: str, 
-                              history: Optional[list] = None) -> str:
+                              history: Optional[List[Dict]] = None) -> str:
     """
     获取Gemini生成的回复（支持对话历史）
 
@@ -78,14 +76,27 @@ def get_response_with_history(model: Any,
         Exception: API调用失败时抛出异常
     """
     try:
-        # 创建聊天
-        chat = model.chats.create(
-            model="gemma-3-27b-it",
-            messages=history or []
-        )
+        contents = []
         
-        # 发送消息
-        response = chat.send_message(user_message)
+        if history:
+            for msg in history:
+                role = msg.get("role", "user")
+                parts = msg.get("parts", [])
+                text_content = parts[0] if parts else ""
+                contents.append({
+                    "role": role,
+                    "parts": [{"text": text_content}]
+                })
+        
+        contents.append({
+            "role": "user",
+            "parts": [{"text": user_message}]
+        })
+        
+        response = model.models.generate_content(
+            model="gemma-3-27b-it",
+            contents=contents
+        )
         return response.text
     except Exception as e:
         raise Exception(f"Gemini API调用失败: {str(e)}")
