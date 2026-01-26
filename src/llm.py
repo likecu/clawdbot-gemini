@@ -9,16 +9,16 @@ from typing import Optional, Any
 import os
 
 
-def init_gemini(api_key: Optional[str] = None, model: str = "gemma-3-27b") -> Any:
+def init_gemini(api_key: Optional[str] = None, model: str = "gemma-3-27b-it") -> Any:
     """
     初始化Gemini模型
 
     Args:
         api_key: Google API密钥，如果为None则从环境变量GOOGLE_API_KEY获取
-        model: 模型名称，默认为gemini-1.5-pro
+        model: 模型名称，默认为gemma-3-27b-it
 
     Returns:
-        GenerativeModel实例
+        初始化后的模型实例
 
     Raises:
         ValueError: 当api_key为空且环境变量中也不存在时抛出
@@ -33,12 +33,12 @@ def init_gemini(api_key: Optional[str] = None, model: str = "gemma-3-27b") -> An
     return genai.GenerativeModel(model)
 
 
-def get_response(model: genai.GenerativeModel, user_message: str) -> str:
+def get_response(model: Any, user_message: str) -> str:
     """
     获取Gemini生成的回复
 
     Args:
-        model: 已初始化的GenerativeModel实例
+        model: 已初始化的模型实例
         user_message: 用户发送的消息内容
 
     Returns:
@@ -54,14 +54,14 @@ def get_response(model: genai.GenerativeModel, user_message: str) -> str:
         raise Exception(f"Gemini API调用失败: {str(e)}")
 
 
-def get_response_with_history(model: genai.GenerativeModel, 
+def get_response_with_history(model: Any, 
                               user_message: str, 
                               history: Optional[list] = None) -> str:
     """
     获取Gemini生成的回复（支持对话历史）
 
     Args:
-        model: 已初始化的GenerativeModel实例
+        model: 已初始化的模型实例
         user_message: 用户发送的消息内容
         history: 对话历史列表，每条记录为{'role': 'user'/'model', 'parts': [text]}
 
