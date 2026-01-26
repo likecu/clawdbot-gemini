@@ -12,7 +12,7 @@ COPY opencode_requirements.txt .
 RUN pip install --no-cache-dir -r opencode_requirements.txt
 
 COPY src/ ./src/
-COPY ../opencode_server.py .
+COPY opencode_server.py .
 
 ENV PYTHONUNBUFFERED=1
 
