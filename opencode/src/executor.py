@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Tuple, List
 
 # 导入 Gemini 集成
-from llm import init_gemini, get_response_with_history
+from src.llm import init_gemini, get_response_with_history
 
 
 class CodeExecutor:
