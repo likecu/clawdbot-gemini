@@ -15,8 +15,13 @@ import lark_oapi as lark
 from lark_oapi.event import *
 from lark_oapi import *
 
-from llm import init_gemini
-from opencode import init_opencode, get_response
+from lark_oapi.api.im.v1 import (
+    ReplyMessageRequest, ReplyMessageRequestBody,
+    CreateMessageRequest, CreateMessageRequestBody
+)
+
+from llm import init_gemini, get_response as get_gemini_response
+from opencode import init_opencode, get_response as get_opencode_response
 from utils import setup_logging
 
 
@@ -106,14 +111,13 @@ class ClawdbotApplication:
                 # 初始化OpenCode
                 opencode_client = init_opencode()
                 # 获取OpenCode回复
-                response_text = get_response(opencode_client, user_text)
+                response_text = get_opencode_response(opencode_client, user_text)
                 self.logger.info(f"OpenCode回复: {response_text}")
             except Exception as e:
                 self.logger.error(f"OpenCode调用失败: {str(e)}")
                 # 失败时回退到Gemini
                 self.logger.info("OpenCode调用失败，回退到Gemini")
-                from llm import get_response
-                response_text = get_response(self.llm_model, user_text)
+                response_text = get_gemini_response(self.llm_model, user_text)
                 self.logger.info(f"Gemini回复: {response_text}")
             
             # 回复消息
