@@ -55,14 +55,9 @@ services:
       - ./logs:/app/logs
     depends_on:
       opencode_service:
-        condition: service_healthy
+        condition: service_started
     networks:
       - clawdbot_network
-    healthcheck:
-      test: ["CMD", "python", "-c", "import os; exit(0)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     logging:
       driver: "json-file"
       options:

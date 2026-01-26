@@ -12,3 +12,4 @@ __pycache__/
 opencode/opencode.service
 opencode/opencode_acp.service
 opencode/opencode.json
+*env*
