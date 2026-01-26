@@ -1,250 +1,202 @@
 """
-OpenCode API接口封装模块
+OpenCode服务集成模块
 
-提供与OpenCode模型交互的功能，包括初始化、生成内容等操作
+提供与官方OpenCode服务交互的功能，支持通过OpenAI兼容的API调用Gemini模型
 """
 
-import requests
-from typing import Optional, Any, Dict, List
 import os
 import json
-import time
+import requests
+from typing import Optional, Dict, Any, List
+from datetime import datetime, timedelta
 
 
 class OpenCodeClient:
     """
-    OpenCode 客户端类
-
-    提供与 OpenCode 服务交互的完整功能
+    OpenCode服务客户端类
+    
+    封装与OpenCode服务的通信逻辑，提供消息发送和响应接收功能
     """
-
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, max_retries: int = 3):
+    
+    def __init__(self, api_base_url: str = None, api_key: str = None):
         """
-        初始化 OpenCode 客户端
-
+        初始化OpenCode客户端
+        
         Args:
-            api_key: API密钥，如果为None则从环境变量获取
-            base_url: API基础URL，如果为None则从环境变量获取
-            max_retries: 最大重试次数，默认3次
+            api_base_url: OpenCode服务的基础URL，默认从环境变量获取
+            api_key: API认证密钥，默认从环境变量获取
         """
-        self.api_key = api_key or os.getenv("OPENCODE_API_KEY")
-        self.base_url = base_url or os.getenv("OPENCODE_API_BASE_URL")
-        self.max_retries = max_retries
-        self.timeout = 30
-
-        if not self.api_key:
-            raise ValueError("OpenCode API Key未配置，请设置OPENCODE_API_KEY环境变量或传入api_key参数")
-
-        if not self.base_url:
-            raise ValueError("OpenCode API Base URL未配置，请设置OPENCODE_API_BASE_URL环境变量或传入base_url参数")
-
-    def _make_request(self, endpoint: str, payload: Dict, method: str = "POST") -> Dict:
-        """
-        发起API请求（带重试机制）
-
-        Args:
-            endpoint: API端点
-            payload: 请求数据
-            method: HTTP方法
-
-        Returns:
-            Dict: API响应
-
-        Raises:
-            Exception: 所有重试失败后抛出异常
-        """
-        url = f"{self.base_url}{endpoint}"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
-        }
-
-        last_exception = None
-
-        for attempt in range(self.max_retries):
-            try:
-                if method.upper() == "POST":
-                    response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-                else:
-                    response = requests.get(url, headers=headers, timeout=self.timeout)
-
-                response.raise_for_status()
-                return response.json()
-
-            except requests.exceptions.ConnectionError as e:
-                last_exception = e
-                if attempt < self.max_retries - 1:
-                    wait_time = (attempt + 1) * 2
-                    time.sleep(wait_time)
-                    continue
-                raise Exception(f"无法连接到 OpenCode 服务: {str(e)}")
-
-            except requests.exceptions.Timeout as e:
-                last_exception = e
-                if attempt < self.max_retries - 1:
-                    wait_time = (attempt + 1) * 2
-                    time.sleep(wait_time)
-                    continue
-                raise Exception(f"OpenCode 服务超时: {str(e)}")
-
-            except requests.exceptions.HTTPError as e:
-                status_code = e.response.status_code
-                if status_code == 401:
-                    raise Exception(f"OpenCode 认证失败: 无效的API密钥")
-                elif status_code == 429:
-                    if attempt < self.max_retries - 1:
-                        wait_time = (attempt + 1) * 5
-                        time.sleep(wait_time)
-                        continue
-                    raise Exception(f"OpenCode 请求频率超限，请稍后重试")
-                else:
-                    raise Exception(f"OpenCode HTTP错误 ({status_code}): {str(e)}")
-
-            except requests.RequestException as e:
-                raise Exception(f"OpenCode API调用失败: {str(e)}")
-
-        raise Exception(f"OpenCode 请求失败，已重试 {self.max_retries} 次: {str(last_exception)}")
-
-    def chat(self, message: str, history: Optional[List[Dict]] = None, model: str = "opencode-1.0",
-             temperature: float = 0.7, max_tokens: int = 1000) -> str:
-        """
-        发送聊天消息
-
-        Args:
-            message: 用户消息
-            history: 对话历史
-            model: 模型名称
-            temperature: 温度参数
-            max_tokens: 最大token数
-
-        Returns:
-            str: AI生成的回复
-        """
-        messages = []
-
-        if history:
-            for h in history:
-                messages.append({
-                    "role": h.get("role", "user"),
-                    "content": h.get("content", "")
-                })
-
-        messages.append({
-            "role": "user",
-            "content": message
+        self.api_base_url = api_base_url or os.getenv("OPENCODE_API_BASE_URL", "http://opencode_service:8080/v1")
+        self.api_key = api_key or os.getenv("OPENCODE_API_KEY", "my_internal_secret_2024")
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
         })
-
+        self.conversation_history: List[Dict[str, str]] = []
+        self.last_request_time: Optional[datetime] = None
+        self.request_interval: float = 1.0
+    
+    def _check_rate_limit(self) -> None:
+        """
+        检查并应用速率限制
+        
+        Raises:
+            RuntimeError: 请求过于频繁时抛出
+        """
+        if self.last_request_time:
+            elapsed = (datetime.now() - self.last_request_time).total_seconds()
+            if elapsed < self.request_interval:
+                raise RuntimeError(f"请求过于频繁，请等待 {self.request_interval - elapsed:.2f} 秒")
+        self.last_request_time = datetime.now()
+    
+    def chat(self, message: str, model: str = "gemini-1.5-pro") -> str:
+        """
+        发送消息并获取回复
+        
+        Args:
+            message: 用户发送的消息内容
+            model: 使用的模型名称，默认gemini-1.5-pro
+            
+        Returns:
+            str: OpenCode服务生成的回复文本
+            
+        Raises:
+            Exception: API调用失败时抛出异常，包含详细错误信息
+        """
+        self._check_rate_limit()
+        
+        url = f"{self.api_base_url}/chat/completions"
+        
         payload = {
             "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens
+            "messages": self.conversation_history + [{"role": "user", "content": message}],
+            "temperature": 0.7,
+            "max_tokens": 4096
         }
-
-        result = self._make_request("/chat/completions", payload)
-        return result["choices"][0]["message"]["content"]
-
-    def execute_code(self, code: str, language: str = "python") -> str:
+        
+        try:
+            response = self.session.post(url, json=payload, timeout=60)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            assistant_message = data["choices"][0]["message"]["content"]
+            
+            self.conversation_history.append({"role": "user", "content": message})
+            self.conversation_history.append({"role": "assistant", "content": assistant_message})
+            
+            if len(self.conversation_history) > 20:
+                self.conversation_history = self.conversation_history[-20:]
+            
+            return assistant_message
+            
+        except requests.exceptions.Timeout:
+            raise Exception("OpenCode服务响应超时，请稍后重试")
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"OpenCode服务请求失败: {str(e)}")
+        except (KeyError, IndexError, json.JSONDecodeError) as e:
+            raise Exception(f"OpenCode服务响应格式错误: {str(e)}")
+    
+    def clear_history(self) -> None:
         """
-        执行代码
-
-        Args:
-            code: 要执行的代码
-            language: 编程语言
-
+        清空对话历史
+        """
+        self.conversation_history.clear()
+    
+    def get_history(self) -> List[Dict[str, str]]:
+        """
+        获取当前对话历史
+        
         Returns:
-            str: 执行结果
+            List[Dict]: 对话历史列表
         """
-        messages = [
-            {
-                "role": "user",
-                "content": f"请运行以下 {language} 代码：\n```{language}\n{code}\n```"
-            }
-        ]
-
-        payload = {
-            "model": "opencode-1.0",
-            "messages": messages,
-            "temperature": 0.3,
-            "max_tokens": 2000
-        }
-
-        result = self._make_request("/chat/completions", payload)
-        return result["choices"][0]["message"]["content"]
-
-    def list_models(self) -> List[Dict]:
+        return self.conversation_history.copy()
+    
+    def health_check(self) -> bool:
         """
-        获取可用模型列表
-
+        检查OpenCode服务健康状态
+        
         Returns:
-            List[Dict]: 模型列表
+            bool: 服务健康返回True，否则返回False
         """
-        result = self._make_request("/models", {}, method="GET")
-        return result.get("data", [])
-
-    def health_check(self) -> Dict:
-        """
-        健康检查
-
-        Returns:
-            Dict: 健康状态信息
-        """
-        result = self._make_request("/health", {}, method="GET")
-        return result
+        try:
+            url = f"{self.api_base_url.replace('/v1', '')}/health"
+            response = self.session.get(url, timeout=10)
+            return response.status_code == 200
+        except Exception:
+            return False
 
 
-def init_opencode(api_key: Optional[str] = None, base_url: Optional[str] = None) -> OpenCodeClient:
+_client_instance: Optional[OpenCodeClient] = None
+
+
+def init_opencode(api_base_url: str = None, api_key: str = None) -> OpenCodeClient:
     """
-    初始化OpenCode客户端
-
+    初始化OpenCode服务客户端
+    
     Args:
-        api_key: OpenCode API密钥，如果为None则从环境变量OPENCODE_API_KEY获取
-        base_url: OpenCode API基础URL，如果为None则从环境变量OPENCODE_API_BASE_URL获取
-
+        api_base_url: OpenCode服务的基础URL
+        api_key: API认证密钥
+        
     Returns:
         OpenCodeClient: 初始化的客户端实例
-
+        
     Raises:
-        ValueError: 当配置缺失时抛出
+        ValueError: 参数无效时抛出
     """
-    return OpenCodeClient(api_key=api_key, base_url=base_url)
+    global _client_instance
+    
+    if _client_instance is None:
+        _client_instance = OpenCodeClient(api_base_url, api_key)
+    else:
+        if api_base_url:
+            _client_instance.api_base_url = api_base_url
+        if api_key:
+            _client_instance.api_key = api_key
+    
+    return _client_instance
 
 
-def get_response(config: OpenCodeClient, user_message: str, model: str = "opencode-1.0") -> str:
+def get_response(client: OpenCodeClient, user_message: str) -> str:
     """
-    获取OpenCode生成的回复（兼容旧接口）
-
+    获取OpenCode生成的回复
+    
     Args:
-        config: OpenCodeClient实例
+        client: 已初始化的OpenCodeClient实例
         user_message: 用户发送的消息内容
-        model: 模型名称，默认为opencode-1.0
-
+        
     Returns:
         str: OpenCode生成的回复文本
-
+        
     Raises:
         Exception: API调用失败时抛出异常
     """
-    return config.chat(user_message, model=model)
+    return client.chat(user_message)
 
 
-def get_response_with_history(config: OpenCodeClient,
-                              user_message: str,
-                              history: Optional[List[Dict]] = None,
-                              model: str = "opencode-1.0") -> str:
+def reset_opencode_client() -> None:
     """
-    获取OpenCode生成的回复（支持对话历史）
-
-    Args:
-        config: OpenCodeClient实例
-        user_message: 用户发送的消息内容
-        history: 对话历史列表，每条记录为{'role': 'user'/'assistant', 'content': 'text'}
-        model: 模型名称，默认为opencode-1.0
-
-    Returns:
-        str: OpenCode生成的回复文本
-
-    Raises:
-        Exception: API调用失败时抛出异常
+    重置OpenCode客户端实例，用于重新初始化
     """
-    return config.chat(user_message, history=history, model=model)
+    global _client_instance
+    _client_instance = None
+
+
+if __name__ == "__main__":
+    print("OpenCode服务客户端测试")
+    print("=" * 50)
+    
+    try:
+        client = init_opencode()
+        
+        if client.health_check():
+            print("OpenCode服务健康检查通过")
+            
+            response = get_response(client, "你好，请介绍一下你自己")
+            print(f"\n回复: {response}")
+        else:
+            print("警告: OpenCode服务健康检查失败")
+            
+    except Exception as e:
+        print(f"测试失败: {e}")
