@@ -45,6 +45,12 @@ def authenticate_request(func):
     """
     认证装饰器
     验证请求中的 API 密钥是否有效
+
+    Args:
+        func: 被装饰的函数
+
+    Returns:
+        wrapper: 装饰后的函数
     """
 
     @wraps(func)
@@ -106,8 +112,10 @@ def authenticate_request(func):
 def validate_chat_request(data: Dict) -> Optional[str]:
     """
     验证聊天请求参数
+
     Args:
         data: 请求数据字典
+
     Returns:
         str: 验证失败时的错误消息，成功时返回 None
     """
@@ -131,269 +139,107 @@ def validate_chat_request(data: Dict) -> Optional[str]:
     return None
 
 
-def analyze_intent(user_message: str) -> Dict[str, Any]:
+def analyze_intent_with_ai(user_message: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
     """
-    分析用户意图，判断是否需要获取系统数据
+    使用 AI 分析用户意图，返回 JSON 格式的结果
 
     Args:
         user_message: 用户消息
+        conversation_history: 对话历史（可选）
 
     Returns:
-        Dict: 意图分析结果
+        Dict: 意图分析结果，包含 intents、need_execution、generated_code、response_text
     """
-    message_lower = user_message.lower()
+    gemini_model = executor.get_gemini_model()
 
-    intent_patterns = {
-        'system_info': [
-            '内存', 'memory', 'cpu', '磁盘', '硬盘', '空间',
-            '系统信息', 'system info', 'system information',
-            '使用率', 'usage', 'utilization',
-            '负载', 'load average', 'load',
-            '进程', 'process', '进程列表',
-            '网络', 'network', '连接数',
-            '端口', 'port', '监听',
-        ],
-        'file_operation': [
-            '文件', 'file', '目录', 'folder', '列出',
-            '读取', 'read', '查看', 'cat', 'type',
-            '写入', 'write', '创建', 'create', '删除', 'delete',
-            '大小', 'size', '权限', 'permission', 'chmod',
-            '搜索', 'search', 'find', 'grep',
-        ],
-        'environment': [
-            '环境变量', 'environment', 'env', '变量',
-            'python', 'pip', '包', 'package', '依赖', 'dependency',
-            '版本', 'version', 'python version',
-            'docker', '容器', 'container',
-        ],
-        'network_info': [
-            'curl', 'wget', 'ping', 'dns', 'ip 地址',
-            '端口', 'port', '连接', 'connection',
-            '请求', 'request', 'http', 'api',
-        ],
-        'computation': [
-            '计算', 'calculate', 'compute', '求和', 'sum',
-            '排序', 'sort', '搜索', 'search',
-            '斐波那契', 'fibonacci', '阶乘', 'factorial',
-            '素数', 'prime', '统计', 'statistics',
-        ],
-    }
+    history_text = ""
+    if conversation_history:
+        history_text = "\n对话历史:\n" + "\n".join([
+            f"{msg.get('role', 'user')}: {msg.get('parts', [msg.get('content', '')])[-1]}"
+            for msg in conversation_history[-5:]
+        ])
 
-    detected_intents = []
+    system_prompt = """你是一个意图分析助手。用户会发送消息，你需要进行意图分析并生成代码。
 
-    for intent, patterns in intent_patterns.items():
-        for pattern in patterns:
-            if pattern in message_lower:
-                detected_intents.append(intent)
-                break
+## 分析要求
+1. 分析用户消息，判断是否需要获取系统数据或执行代码
+2. 如果需要执行代码，生成 Python 代码来完成任务
+3. 如果不需要执行代码，准备一个友好的回复
 
-    need_execution = len(detected_intents) > 0 or any(keyword in message_lower for keyword in [
-        '执行', '运行', 'run', 'execute', '帮我', '请',
-        '当前', '现在', 'today', '当前日期', '当前时间',
-    ])
+## 意图类型
+- system_info: 系统信息（内存、CPU、磁盘、网络、进程等）
+- file_operation: 文件操作（列出、读取、创建、删除文件等）
+- environment: 环境信息（Python版本、环境变量、Docker等）
+- network_info: 网络操作（curl、ping、API请求等）
+- computation: 计算任务（排序、搜索、数学计算等）
+- general_chat: 一般对话（不需要执行代码）
 
-    return {
-        'intents': detected_intents,
-        'need_execution': need_execution,
-        'message_lower': message_lower
-    }
+## 输出格式
+请返回严格的 JSON 对象（不要包含任何其他文本）：
 
+```json
+{
+    "intents": ["system_info"],
+    "need_execution": true,
+    "generated_code": "import psutil\nprint('内存使用情况:')\nmemory = psutil.virtual_memory()\nprint(f'使用率: {memory.percent}%')",
+    "response_text": null
+}
+```
 
-def generate_code_for_intent(intent_info: Dict[str, Any]) -> Optional[str]:
-    """
-    根据意图生成代码
+或者（不需要执行代码时）：
 
-    Args:
-        intent_info: 意图分析结果
+```json
+{
+    "intents": ["general_chat"],
+    "need_execution": false,
+    "generated_code": null,
+    "response_text": "你好！我是 Clawdbot，一个 AI 编程助手。我可以帮助你完成编程任务、获取系统信息等。"
+}
+```
 
-    Returns:
-        str: 生成的代码，如果没有匹配返回 None
-    """
-    message = intent_info['message_lower']
-    intents = intent_info['intents']
+## 代码要求
+1. 使用 Python 3
+2. 代码必须完整可运行
+3. 使用 print 输出结果
+4. 不要使用 input() 或 interactive 功能
+5. 执行时间限制 30 秒
+6. 导入必要的模块（psutil、os、subprocess 等）
 
-    code_templates = {
-        'system_info': {
-            'memory': '''import psutil
-memory = psutil.virtual_memory()
-print(f"内存使用情况:")
-print(f"  总内存: {memory.total / (1024**3):.2f} GB")
-print(f"  已用内存: {memory.used / (1024**3):.2f} GB")
-print(f"  可用内存: {memory.available / (1024**3):.2f} GB")
-print(f"  使用率: {memory.percent:.1f}%")
-''',
-            'cpu': '''import psutil
-print(f"CPU 使用情况:")
-print(f"  CPU 逻辑核心数: {psutil.cpu_count()}")
-print(f"  CPU 物理核心数: {psutil.cpu_count(logical=False)}")
-print(f"  当前 CPU 使用率: {psutil.cpu_percent(interval=1)}%")
-print(f"  各核心使用率: {psutil.cpu_percent(interval=1, percpu=True)}")
-print(f"  系统负载 (1/5/15分钟): {os.getloadavg()}")
-''',
-            'disk': '''import psutil
-print(f"磁盘使用情况:")
-for part in psutil.disk_partitions():
-    usage = psutil.disk_usage(part.mountpoint)
-    print(f"  {part.mountpoint}:")
-    print(f"    总空间: {usage.total / (1024**3):.2f} GB")
-    print(f"    已用: {usage.used / (1024**3):.2f} GB")
-    print(f"    可用: {usage.free / (1024**3):.2f} GB")
-    print(f"    使用率: {usage.percent:.1f}%")
-''',
-            'process': '''import psutil
-print(f"系统进程信息:")
-print(f"  进程总数: {len(psutil.pids())}")
-print(f"  前5个进程:")
-for pid in sorted(psutil.pids())[:5]:
+当前时间: """ + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + history_text
+
     try:
-        p = psutil.Process(pid)
-        print(f"    PID {pid}: {p.name()} - CPU: {p.cpu_percent():.1f}% - Memory: {p.memory_info().rss / (1024**2):.1f} MB")
-    except:
-        pass
-''',
-            'network': '''import psutil
-print(f"网络连接信息:")
-connections = psutil.net_connections()
-print(f"  总连接数: {len(connections)}")
-established = [c for c in connections if c.status == 'ESTABLISHED']
-print(f"  ESTABLISHED 连接: {len(established)}")
-print(f"  各状态统计:")
-for status in ['ESTABLISHED', 'TIME_WAIT', 'CLOSE_WAIT', 'LISTEN']:
-    count = len([c for c in connections if c.status == status])
-    print(f"    {status}: {count}")
-''',
-        },
-        'file_operation': {
-            'list_files': '''import os
-path = '.'
-print(f"目录 {path} 内容:")
-for item in sorted(os.listdir(path)):
-    full_path = os.path.join(path, item)
-    if os.path.isdir(full_path):
-        print(f"  [DIR]  {item}")
-    else:
-        size = os.path.getsize(full_path)
-        print(f"  [FILE] {item} ({size} bytes)")
-''',
-            'file_size': '''import os
-import glob
-print("查找大文件:")
-for pattern in ['**/*.py', '**/*.log', '**/*.tmp']:
-    for f in glob.glob(pattern, recursive=True):
-        size = os.path.getsize(f)
-        if size > 1024 * 1024:
-            print(f"  {f}: {size / (1024**2):.2f} MB")
-''',
-        },
-        'environment': {
-            'python_info': '''import sys
-import platform
-print(f"Python 环境信息:")
-print(f"  Python 版本: {sys.version}")
-print(f"  可执行文件: {sys.executable}")
-print(f"  编码: {sys.getdefaultencoding()}")
-print(f"  平台: {platform.platform()}")
-print(f"  架构: {platform.machine()}")
-''',
-            'pip_list': '''import subprocess
-result = subprocess.run(['pip', 'list', '--format=json'], capture_output=True, text=True)
-packages = json.loads(result.stdout)
-print(f"已安装的包数量: {len(packages)}")
-print(f"前10个包:")
-for p in sorted(packages, key=lambda x: x['name'].lower())[:10]:
-    print(f"  {p['name']}=={p['version']}")
-''',
-        },
-        'network_info': {
-            'curl': '''import subprocess
-result = subprocess.run(['curl', '-s', 'ifconfig.me'], capture_output=True, text=True)
-print(f"公网 IP: {result.stdout.strip()}")
-''',
-        },
-        'computation': {
-            'fibonacci': '''def fibonacci(n):
-    if n <= 1:
-        return n
-    a, b = 0, 1
-    for _ in range(n):
-        a, b = b, a + b
-    return a
+        response = gemini_model.generate_content(
+            f"{system_prompt}\n\n用户消息: {user_message}"
+        )
+        response_text = response.text.strip()
 
-n = 20
-print(f"斐波那契数列前 {n} 项:")
-result = [fibonacci(i) for i in range(n)]
-print(result)
-print(f"第 {n} 项: {fibonacci(n)}")
-''',
-            'prime': '''def is_prime(n):
-    if n < 2:
-        return False
-    for i in range(2, int(n**0.5) + 1):
-        if n % i == 0:
-            return False
-    return True
-
-primes = [n for n in range(2, 101) if is_prime(n)]
-print(f"2-100 范围内的素数 ({len(primes)} 个):")
-print(primes)
-''',
-        }
-    }
-
-    import os
-    os.environ['PYTHONUNBUFFERED'] = '1'
-
-    if 'system_info' in intents:
-        if 'memory' in message or '内存' in message:
-            return code_templates['system_info']['memory']
-        elif 'cpu' in message or 'cpu' in message:
-            return code_templates['system_info']['cpu']
-        elif '磁盘' in message or '硬盘' in message or 'disk' in message:
-            return code_templates['system_info']['disk']
-        elif '进程' in message or 'process' in message:
-            return code_templates['system_info']['process']
-        elif '网络' in message or 'network' in message:
-            return code_templates['system_info']['network']
+        json_match = re.search(r'```json\s*([\s\S]*?)\s*```', response_text)
+        if json_match:
+            json_str = json_match.group(1)
         else:
-            return code_templates['system_info']['memory']
+            json_str = response_text
 
-    if 'file_operation' in intents:
-        if '列出' in message or 'list' in message or '目录' in message:
-            return code_templates['file_operation']['list_files']
-        elif '大小' in message or 'size' in message or '大文件' in message:
-            return code_templates['file_operation']['file_size']
+        result = json.loads(json_str)
 
-    if 'environment' in intents:
-        if 'python' in message or '版本' in message:
-            return code_templates['environment']['python_info']
-        elif 'pip' in message or '包' in message:
-            return code_templates['environment']['pip_list']
+        if not isinstance(result, dict):
+            raise ValueError("返回结果不是 JSON 对象")
 
-    if 'network_info' in intents:
-        if 'ip' in message:
-            return code_templates['network_info']['curl']
+        required_keys = ['intents', 'need_execution']
+        for key in required_keys:
+            if key not in result:
+                raise ValueError(f"返回结果缺少必要字段: {key}")
 
-    if 'computation' in intents:
-        if '斐波那契' in message or 'fibonacci' in message:
-            return code_templates['computation']['fibonacci']
-        elif '素数' in message or 'prime' in message:
-            return code_templates['computation']['prime']
+        logger.info(f'AI 意图分析结果: {result}')
+        return result
 
-    if any(kw in message for kw in ['当前时间', '现在时间', 'today', 'time now', '几点']):
-        return '''from datetime import datetime
-print(f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-print(f"当前日期: {datetime.now().strftime('%Y-%m-%d')}")
-print(f"当前时间戳: {datetime.now().timestamp()}")
-'''
-
-    if any(kw in message for kw in ['当前日期', 'today', 'date now']):
-        return '''from datetime import datetime
-print(f"当前日期: {datetime.now().strftime('%Y-%m-%d')}")
-print(f"当前时间: {datetime.now().strftime('%H:%M:%S')}")
-print(f"今天是星期: {['一', '二', '三', '四', '五', '六', '日'][datetime.now().weekday()]}")
-'''
-
-    return None
+    except Exception as e:
+        logger.error(f'AI 意图分析失败: {str(e)}，使用默认处理')
+        return {
+            'intents': [],
+            'need_execution': False,
+            'generated_code': None,
+            'response_text': None
+        }
 
 
 def execute_python_code(code: str) -> str:
@@ -527,31 +373,26 @@ def create_chat_completion():
 
         logger.info(f'收到聊天请求，模型: {model}, 消息长度: {len(user_message)}')
 
-        intent_info = analyze_intent(user_message)
-        logger.info(f'意图分析: {intent_info}')
+        intent_result = analyze_intent_with_ai(user_message, conversation_history)
+        logger.info(f'AI 意图分析结果: {intent_result}')
 
-        generated_code = None
+        assistant_response = ""
 
-        if intent_info['need_execution']:
-            generated_code = generate_code_for_intent(intent_info)
+        if intent_result.get('need_execution') and intent_result.get('generated_code'):
+            generated_code = intent_result['generated_code']
+            logger.info(f'执行 AI 生成的代码...')
+            code_result = execute_python_code(generated_code)
+            logger.info(f'代码执行结果: {code_result[:200]}...')
 
-            if generated_code:
-                logger.info(f'自动生成代码执行...')
-                code_result = execute_python_code(generated_code)
-                logger.info(f'代码执行结果: {code_result[:200]}...')
-
-                if code_result.strip() and not code_result.startswith('错误'):
-                    assistant_response = f"执行结果：\n{code_result}"
-                else:
-                    assistant_response = code_result if code_result else "代码执行完成，无输出"
+            if code_result.strip() and not code_result.startswith('错误'):
+                assistant_response = f"执行结果：\n{code_result}"
             else:
-                should_execute, code_result = executor.analyze_and_execute(user_message)
-                if should_execute and code_result:
-                    assistant_response = f"代码执行结果：\n{code_result}"
-                else:
-                    intent_info['need_execution'] = False
+                assistant_response = code_result if code_result else "代码执行完成，无输出"
 
-        if not intent_info['need_execution'] or not generated_code:
+        elif intent_result.get('response_text'):
+            assistant_response = intent_result['response_text']
+
+        else:
             from src.llm import get_response_with_history
 
             gemini_model = executor.get_gemini_model()

@@ -1,5 +1,6 @@
 .env
 .env.example
+.env.opencode
 logs/
 __pycache__/
 *.pyc
@@ -8,3 +9,6 @@ __pycache__/
 .git/
 *.log
 .DS_Store
+opencode/opencode.service
+opencode/opencode_acp.service
+opencode/opencode.json

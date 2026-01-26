@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   # OpenCode 服务（工程师角色）
-  # 自定义实现，支持 Gemini API
+  # 自定义实现，支持 Gemini API 和 AI 意图分析
   opencode_service:
     build:
       context: ./opencode
