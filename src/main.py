@@ -1,36 +1,34 @@
 """
 Clawdbot主程序入口
 
-飞书机器人与Google Gemini AI的集成应用
-支持长连接模式接收飞书消息并通过Gemini进行智能回复
+基于飞书WebSocket长连接和DeepSeek大模型的智能编程助手
 """
 
 import os
 import sys
 import signal
 import logging
+import asyncio
+from typing import Optional
+
 from dotenv import load_dotenv
 
 import lark_oapi as lark
-from lark_oapi.event import *
-from lark_oapi import *
 
-from lark_oapi.api.im.v1 import (
-    ReplyMessageRequest, ReplyMessageRequestBody,
-    CreateMessageRequest, CreateMessageRequestBody
-)
-
-from llm import init_llm, get_llm_response, init_gemini, get_response as get_gemini_response
-from opencode import init_opencode, get_response as get_opencode_response
-from openrouter import init_openrouter, get_response as get_openrouter_response
-from utils import setup_logging
+from adapters.lark import LarkWSClient, EventDispatcher, ParsedMessage
+from adapters.llm import init_client, OpenRouterClient
+from core import Agent, create_agent
+from core.session import create_session_manager
+from core.prompt import create_prompt_builder
+from infrastructure.redis_client import create_redis_client
+from config import get_settings
 
 
 class ClawdbotApplication:
     """
     Clawdbot应用程序类
     
-    整合飞书客户端和Gemini模型，提供完整的机器人功能
+    整合飞书WebSocket客户端和LLM智能体，提供完整的机器人功能
     """
     
     def __init__(self):
@@ -38,220 +36,194 @@ class ClawdbotApplication:
         初始化应用程序
         """
         load_dotenv()
-        self.logger = setup_logging(os.getenv("LOG_LEVEL", "INFO"))
+        
+        self.settings = get_settings()
+        self.logger = self._setup_logging()
+        
         self.logger.info("正在初始化Clawdbot应用...")
         
-        self.llm_model = None
-        self.openrouter_client = None
-        self.opencode_client = None
-        self.is_running = False
-        self.client = None
-        self.processed_messages = set()  # 用于消息去重
-        self.active_model = os.getenv("ACTIVE_MODEL", "gemini")  # 可选值: gemini/opencode/openrouter
+        self.llm_client: Optional[OpenRouterClient] = None
+        self.agent: Optional[Agent] = None
+        self.ws_client: Optional[LarkWSClient] = None
+        self.event_dispatcher: Optional[EventDispatcher] = None
+        
+        self._is_running = False
+    
+    def _setup_logging(self) -> logging.Logger:
+        """
+        配置日志系统
+        
+        Returns:
+            logging.Logger: 日志记录器
+        """
+        log_level = getattr(logging, self.settings.log_level.upper(), logging.INFO)
+        
+        logging.basicConfig(
+            level=log_level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        
+        return logging.getLogger("Clawdbot")
+    
+    def _validate_config(self) -> None:
+        """
+        验证配置有效性
+        
+        Raises:
+            ValueError: 配置无效时抛出
+        """
+        is_valid, errors = self.settings.validate()
+        if not is_valid:
+            error_msg = "\n".join(errors)
+            self.logger.error(f"配置验证失败:\n{error_msg}")
+            raise ValueError(f"配置错误: {error_msg}")
+        
+        self.logger.info("配置验证通过")
     
     def initialize(self) -> None:
         """
         初始化所有组件
         
         Raises:
-            Exception: 初始化失败时抛出异常
+            Exception: 初始化失败时抛出
         """
         try:
-            self.logger.info(f"正在使用模型: {self.active_model}")
+            self.logger.info("正在验证配置...")
+            self._validate_config()
             
-            # 只有在使用Gemini时才初始化
-            if self.active_model == "gemini":
-                self.logger.info("正在初始化Gemini模型...")
-                self.llm_model = init_gemini()
-                self.logger.info("Gemini模型初始化成功")
-            elif self.active_model == "openrouter":
-                self.logger.info("正在初始化OpenRouter客户端...")
-                self.openrouter_client = init_openrouter()
-                self.logger.info("OpenRouter客户端初始化成功")
-            elif self.active_model == "opencode":
-                self.logger.info("正在初始化OpenCode客户端...")
-                self.opencode_client = init_opencode()
-                self.logger.info("OpenCode客户端初始化成功")
+            self.logger.info(f"使用模型: {self.settings.active_model}")
+            self.logger.info(f"模型: {self.settings.openrouter_default_model}")
             
-            self.logger.info("正在初始化飞书长连接客户端...")
+            # 初始化LLM客户端
+            self.logger.info("正在初始化LLM客户端...")
+            self.llm_client = init_client(
+                api_key=self.settings.openrouter_api_key,
+                model=self.settings.openrouter_default_model,
+                base_url=self.settings.openrouter_api_base_url
+            )
+            self.logger.info("LLM客户端初始化成功")
             
-            # 创建飞书长连接客户端
-            self.client = lark.Client.builder().app_id(os.getenv("FEISHU_APP_ID")).app_secret(os.getenv("FEISHU_APP_SECRET")).log_level(lark.LogLevel.INFO).build()
+            # 初始化会话管理器
+            self.logger.info("正在初始化会话管理器...")
+            session_manager = create_session_manager(
+                redis_host=self.settings.redis_host,
+                redis_port=self.settings.redis_port,
+                redis_db=self.settings.redis_db,
+                redis_password=self.settings.redis_password,
+                max_history=self.settings.session_max_history
+            )
+            self.logger.info("会话管理器初始化成功")
             
-            self.logger.info("飞书长连接客户端初始化成功")
+            # 初始化提示词构建器
+            self.logger.info("正在初始化提示词构建器...")
+            prompt_builder = create_prompt_builder()
+            self.logger.info("提示词构建器初始化成功")
+            
+            # 初始化智能体
+            self.logger.info("正在初始化智能体...")
+            self.agent = create_agent(
+                llm_client=self.llm_client,
+                session_manager=session_manager,
+                prompt_builder=prompt_builder
+            )
+            self.logger.info("智能体初始化成功")
+            
+            # 初始化事件分发器
+            self.logger.info("正在初始化事件分发器...")
+            self.event_dispatcher = EventDispatcher()
+            self.event_dispatcher.register_message_handler(self._handle_message)
+            self.logger.info("事件分发器初始化成功")
+            
+            # 初始化飞书WebSocket客户端
+            self.logger.info("正在初始化飞书WebSocket客户端...")
+            self.ws_client = LarkWSClient(
+                app_id=self.settings.lark_app_id,
+                app_secret=self.settings.lark_app_secret,
+                encrypt_key=self.settings.lark_encrypt_key,
+                verification_token=self.settings.lark_verification_token
+            )
+            
+            # 注册事件处理函数
+            self.ws_client.register_event_handler(
+                "im.message.receive_v1",
+                self._create_event_handler()
+            )
+            
+            self.logger.info("飞书WebSocket客户端初始化成功")
             self.logger.info("所有组件初始化完成")
             
         except Exception as e:
             self.logger.error(f"初始化失败: {str(e)}")
             raise
     
-    def handle_message(self, message) -> None:
+    def _create_event_handler(self):
         """
-        统一处理消息逻辑
+        创建事件处理函数
         
-        Args:
-            message: 消息对象（EventMessage类型）
-        """
-        try:
-            # 消息去重检查
-            if hasattr(message, 'message_id') and message.message_id:
-                message_id = message.message_id
-                if message_id in self.processed_messages:
-                    self.logger.info(f"消息 {message_id} 已处理，跳过重复处理")
-                    return
-                self.processed_messages.add(message_id)
-            
-            # 解析消息内容
-            import json
-            content_json = json.loads(message.content)
-            user_text = content_json.get("text", "").strip()
-            
-            if not user_text:
-                self.logger.info("收到空消息，跳过处理")
-                return
-            
-            # 群聊消息需要移除@机器人的部分
-            if message.chat_type == "group":
-                # 移除@机器人的标记
-                import re
-                user_text = re.sub(r"@_user_\d+", "", user_text).strip()
-                if not user_text:
-                    self.logger.info("群聊消息仅包含@机器人标记，跳过处理")
-                    return
-            
-            self.logger.info(f"用户消息: {user_text}, 消息类型: {message.message_type}, 聊天类型: {message.chat_type}")
-            
-            # 根据配置的模型选择对应的服务
-            if self.active_model == "gemini":
-                self.logger.info("调用Gemini模型")
-                try:
-                    response_text = get_gemini_response(self.llm_model, user_text)
-                    self.logger.info(f"Gemini回复: {response_text}")
-                except Exception as e:
-                    self.logger.error(f"Gemini调用失败: {str(e)}")
-                    raise
-            
-            elif self.active_model == "openrouter":
-                self.logger.info("调用OpenRouter (deepseek/deepseek-r1)")
-                try:
-                    response_text = get_openrouter_response(self.openrouter_client, user_text)
-                    self.logger.info(f"OpenRouter回复: {response_text}")
-                except Exception as e:
-                    self.logger.error(f"OpenRouter调用失败: {str(e)}")
-                    self.logger.info("OpenRouter调用失败，回退到Gemini")
-                    response_text = get_gemini_response(self.llm_model, user_text)
-                    self.logger.info(f"Gemini回复: {response_text}")
-            
-            else:
-                self.logger.info("调用OpenCode")
-                try:
-                    response_text = get_opencode_response(self.opencode_client or init_opencode(), user_text)
-                    self.logger.info(f"OpenCode回复: {response_text}")
-                except Exception as e:
-                    self.logger.error(f"OpenCode调用失败: {str(e)}")
-                    self.logger.info("OpenCode调用失败，回退到Gemini")
-                    response_text = get_gemini_response(self.llm_model, user_text)
-                    self.logger.info(f"Gemini回复: {response_text}")
-            
-            # 回复消息
-            self.reply_message(message.message_id, response_text, message.chat_type == "group")
-            
-        except Exception as e:
-            self.logger.error(f"处理消息失败: {str(e)}")
-    
-    def reply_message(self, message_id: str, content: str, is_group: bool = False, reply_in_thread: bool = False) -> None:
-        """
-        回复飞书消息
-        
-        Args:
-            message_id: 消息ID
-            content: 回复内容
-            is_group: 是否为群聊消息
-            reply_in_thread: 是否以话题形式回复
-        """
-        try:
-            import json
-            import uuid
-            
-            # 构建回复请求
-            reply_request = ReplyMessageRequest.builder().message_id(message_id).request_body(ReplyMessageRequestBody.builder().content(json.dumps({"text": content})).msg_type("text").reply_in_thread(reply_in_thread).uuid(str(uuid.uuid4())).build()).build()
-            
-            # 发送回复
-            response = self.client.im.v1.message.reply(reply_request)
-            if response.code == 0:
-                self.logger.info(f"消息回复成功，回复消息ID: {response.data.message_id}")
-            else:
-                self.logger.error(f"消息回复失败，错误码: {response.code}, 错误信息: {response.msg}")
-                
-        except Exception as e:
-            self.logger.error(f"回复消息失败: {str(e)}")
-    
-    def send_message(self, receive_id: str, receive_id_type: str, content: str, msg_type: str = "text") -> str:
-        """
-        主动发送消息
-        
-        Args:
-            receive_id: 接收者ID
-            receive_id_type: 接收者类型 (open_id/union_id/user_id/email/chat_id)
-            content: 消息内容
-            msg_type: 消息类型
-            
         Returns:
-            str: 发送成功返回消息ID，失败返回空字符串
+            Callable: 事件处理函数
+        """
+        def handler(data: dict):
+            if self.event_dispatcher:
+                self.event_dispatcher.dispatch("im.message.receive_v1", data)
+        return handler
+    
+    def _handle_message(self, message: ParsedMessage) -> None:
+        """
+        处理消息（事件分发器回调）
+        
+        Args:
+            message: 解析后的消息对象
         """
         try:
-            import json
-            import uuid
+            self.logger.info(f"收到消息: {message.text[:50]}... (chat={message.chat_id})")
             
-            # 构建发送请求
-            create_message_request = CreateMessageRequest.builder().receive_id_type(receive_id_type).request_body(CreateMessageRequestBody.builder().receive_id(receive_id).msg_type(msg_type).content(json.dumps({"text": content})).uuid(str(uuid.uuid4())).build()).build()
+            # 调用智能体处理消息
+            result = self.agent.process_message(
+                user_id=message.sender_id,
+                chat_id=message.chat_id,
+                message=message.text
+            )
             
-            # 发送消息
-            response = self.client.im.v1.message.create(create_message_request)
-            if response.code == 0:
-                self.logger.info(f"消息发送成功，消息ID: {response.data.message_id}")
-                return response.data.message_id
-            else:
-                self.logger.error(f"消息发送失败，错误码: {response.code}, 错误信息: {response.msg}")
-                return ""
+            if result["success"]:
+                response_text = result["text"]
                 
+                # 发送回复
+                self._send_response(message, response_text)
+                
+                self.logger.info(f"回复发送成功: {response_text[:50]}...")
+            else:
+                error_text = result.get("text", "抱歉，处理消息时出现了问题")
+                self._send_response(message, error_text)
+                self.logger.error(f"处理失败: {result.get('error', '未知错误')}")
+                
+        except Exception as e:
+            self.logger.error(f"处理消息异常: {str(e)}")
+            self._send_response(message, f"抱歉，处理消息时出现了问题：{str(e)}")
+    
+    def _send_response(self, message: ParsedMessage, text: str) -> None:
+        """
+        发送响应消息
+        
+        Args:
+            message: 原始消息
+            text: 响应文本
+        """
+        if not self.ws_client or not self.ws_client.is_connected():
+            self.logger.warning("WebSocket客户端未连接，无法发送消息")
+            return
+        
+        try:
+            # 发送文本消息
+            self.ws_client.send_text_message(
+                receive_id=message.sender_id,
+                text=text
+            )
         except Exception as e:
             self.logger.error(f"发送消息失败: {str(e)}")
-            return ""
-    
-    def handle_p2_im_message_receive_v1(self, data: dict) -> None:
-        """
-        处理飞书单聊消息事件
-        
-        Args:
-            data: 飞书单聊消息事件数据
-        """
-        try:
-            self.logger.info(f"收到单聊消息事件: {data}")
-            
-            # 获取消息内容
-            message = data.event.message
-            self.handle_message(message)
-            
-        except Exception as e:
-            self.logger.error(f"处理单聊消息事件失败: {str(e)}")
-    
-    def handle_group_at_message_receive_v1(self, data) -> None:
-        """
-        处理飞书群聊@机器人消息事件
-        
-        Args:
-            data: 飞书群聊@机器人消息事件数据
-        """
-        try:
-            self.logger.info(f"收到群聊@机器人消息事件: {data}")
-            
-            # 获取消息内容
-            message = data.event.message
-            self.handle_message(message)
-            
-        except Exception as e:
-            self.logger.error(f"处理群聊@机器人消息事件失败: {str(e)}")
     
     def start(self) -> None:
         """
@@ -259,62 +231,67 @@ class ClawdbotApplication:
         """
         try:
             self.initialize()
-            self.is_running = True
+            self._is_running = True
             
-            self.logger.info("正在注册事件处理器...")
-            
-            # 创建事件处理器
-            event_handler = EventDispatcherHandler.builder(
-                os.getenv("FEISHU_ENCRYPT_KEY"),
-                os.getenv("FEISHU_VERIFICATION_TOKEN"),
-                lark.LogLevel.INFO
-            )
-            
-            # 注册单聊消息处理器
-            event_handler = event_handler.register_p2_im_message_receive_v1(self.handle_p2_im_message_receive_v1)
-            
-            # 构建事件处理器
-            event_handler = event_handler.build()
-            
-            # 启动长连接监听
-            self.logger.info("正在启动长连接监听...")
-            
-            # 使用飞书SDK的长连接功能
-            from lark_oapi import ws
-            
-            # 创建长连接客户端
-            ws_client = ws.Client(
-                app_id=os.getenv("FEISHU_APP_ID"),
-                app_secret=os.getenv("FEISHU_APP_SECRET"),
-                event_handler=event_handler,
-                log_level=lark.LogLevel.INFO
-            )
-            
-            self.logger.info("Clawdbot已启动，正在监听飞书消息...")
+            self.logger.info("正在启动Clawdbot...")
+            self.logger.info(f"监听地址: {self.settings.app_host}:{self.settings.app_port}")
             self.logger.info("按Ctrl+C可停止服务")
             
-            # 启动长连接客户端
-            ws_client.start()
+            # 启动WebSocket客户端
+            self.ws_client.start(blocking=True)
             
-            # 保持程序运行
-            while self.is_running:
-                import time
-                time.sleep(1)
-                
         except KeyboardInterrupt:
             self.logger.info("收到停止信号，正在退出...")
-            self.stop()
         except Exception as e:
             self.logger.error(f"运行时发生错误: {str(e)}")
-            self.stop()
             raise
+        finally:
+            self.stop()
     
     def stop(self) -> None:
         """
         停止应用程序
         """
-        self.is_running = False
+        self._is_running = False
+        
+        if self.ws_client:
+            self.ws_client.stop()
+        
         self.logger.info("Clawdbot已停止")
+    
+    def health_check(self) -> dict:
+        """
+        健康检查
+        
+        Returns:
+            dict: 健康状态信息
+        """
+        status = {
+            "status": "healthy",
+            "components": {}
+        }
+        
+        # 检查LLM客户端
+        try:
+            if self.llm_client:
+                status["components"]["llm"] = "connected"
+            else:
+                status["components"]["llm"] = "not_initialized"
+        except Exception as e:
+            status["components"]["llm"] = f"error: {str(e)}"
+            status["status"] = "unhealthy"
+        
+        # 检查WebSocket连接
+        try:
+            if self.ws_client and self.ws_client.is_connected():
+                status["components"]["websocket"] = "connected"
+            else:
+                status["components"]["websocket"] = "disconnected"
+        except Exception as e:
+            status["components"]["websocket"] = f"error: {str(e)}"
+            status["status"] = "unhealthy"
+        
+        return status
 
 
 def main():
