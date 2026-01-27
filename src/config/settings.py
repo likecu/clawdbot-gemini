@@ -33,8 +33,14 @@ class Settings:
     deepseek_api_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
     
+    # Qwen Portal配置
+    qwen_credentials_path: str = ""
+    qwen_default_model: str = "qwen-turbo"
+    qwen_oauth_base_url: str = "https://chat.qwen.ai"
+    qwen_oauth_client_id: str = "f0304373b74a44d2b584a3fb70ca9e56"
+    
     # 模型选择
-    active_model: str = "openrouter"  # openrouter 或 deepseek
+    active_model: str = "qwen"  # openrouter, deepseek, 或 qwen
     
     # Redis配置
     redis_host: str = "localhost"
@@ -72,7 +78,12 @@ class Settings:
             deepseek_api_base_url=os.getenv("DEEPSEEK_API_BASE_URL", "https://api.deepseek.com"),
             deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
             
-            active_model=os.getenv("ACTIVE_MODEL", "openrouter"),
+            qwen_credentials_path=os.getenv("QWEN_CREDENTIALS_PATH", ""),
+            qwen_default_model=os.getenv("QWEN_DEFAULT_MODEL", "qwen-turbo"),
+            qwen_oauth_base_url=os.getenv("QWEN_OAUTH_BASE_URL", "https://chat.qwen.ai"),
+            qwen_oauth_client_id=os.getenv("QWEN_OAUTH_CLIENT_ID", "f0304373b74a44d2b584a3fb70ca9e56"),
+            
+            active_model=os.getenv("ACTIVE_MODEL", "qwen"),
             
             redis_host=os.getenv("REDIS_HOST", "localhost"),
             redis_port=int(os.getenv("REDIS_PORT", 6379)),
@@ -104,6 +115,10 @@ class Settings:
             errors.append("OpenRouter API密钥未配置")
         elif self.active_model == "deepseek" and not self.deepseek_api_key:
             errors.append("DeepSeek API密钥未配置")
+        elif self.active_model == "qwen" and not self.qwen_credentials_path:
+            errors.append("Qwen凭证文件路径未配置")
+        elif self.active_model == "qwen" and not os.path.exists(self.qwen_credentials_path):
+            errors.append("Qwen凭证文件不存在，请先在 https://chat.qwen.ai 进行登录授权")
         
         return (len(errors) == 0, errors)
 

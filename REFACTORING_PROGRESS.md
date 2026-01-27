@@ -43,10 +43,11 @@ clawdbot-gemini/src/
 - 支持事件注册和消息处理
 - 实现消息去重和机器人自身消息过滤
 
-#### DeepSeek API集成
-- 通过OpenRouter集成`tngtech/deepseek-r1t2-chimera:free`模型
+#### 通义千问（Qwen）API集成
+- 通过Qwen Portal OAuth登录授权
 - 支持对话历史管理
-- 支持R1推理模型的思考过程分离
+- 凭证存储在远程服务器的`/home/milk/.config/qwen-credentials/`目录
+- 支持qwen-turbo等模型
 
 #### Markdown到飞书富文本转换
 - 支持代码块语法高亮
@@ -116,6 +117,7 @@ clawdbot-gemini/src/
 - `src/adapters/llm/__init__.py`
 - `src/adapters/llm/openrouter_client.py`
 - `src/adapters/llm/deepseek_client.py`
+- `src/adapters/llm/qwen_client.py`
 - `src/core/__init__.py`
 - `src/core/agent.py`
 - `src/core/session.py`
@@ -126,7 +128,7 @@ clawdbot-gemini/src/
 - `src/config/settings.py`
 - `src/main.py`
 - `src/__init__.py`
-- `tests/unit/test_*.py` (6个测试文件)
+- `tests/unit/test_*.py` (5个测试文件)
 - `Dockerfile.refactored`
 - `docker-compose.refactored.yml`
 - `requirements.refactored.txt`
