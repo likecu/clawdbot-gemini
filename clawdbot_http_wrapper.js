@@ -13,7 +13,7 @@ const os = require('os');
 const http = require('http');
 const bodyParser = require('body-parser');
 
-const CALLBACK_URL = 'http://localhost:8081/api/clawdbot/callback';
+const CALLBACK_URL = process.env.CALLBACK_URL || 'http://127.0.0.1:8081/api/clawdbot/callback';
 
 const app = express();
 const port = 3009;
@@ -88,10 +88,12 @@ app.post('/chat', async (req, res) => {
         return res.status(400).json({ error: 'Message is required' });
     }
 
+    console.log(`[${new Date().toISOString()}] DEBUG: Entering /chat handler`);
     const sessionId = session_id || 'qq_default';
+    console.log(`[${new Date().toISOString()}] DEBUG: SessionID=${sessionId}, Message=${message?.substring(0, 30)}...`);
+
     const enrichedMessage = `${message}\n\n(Note: You have FULL access to tools. Please use the 'exec' tool to run Python scripts or other commands to get actual results. Do NOT simulate execution.)`;
 
-    // Command to execute
     const cmdArgs = [
         'agent',
         '--to', sessionId,
@@ -102,40 +104,53 @@ app.post('/chat', async (req, res) => {
         '--timeout', '180'
     ];
 
-    console.log(`[${new Date().toISOString()}] Starting request: ${message.substring(0, 50)}...`);
-
-    // Initial stats to detect new content
+    console.log(`[${new Date().toISOString()}] DEBUG: Initializing stats...`);
     let currentStats = findLatestSessionFileStats();
+    console.log(`[${new Date().toISOString()}] DEBUG: currentStats=${JSON.stringify(currentStats)}`);
+
     let sentSegments = new Set();
 
-    // Start clawdbot process
+    console.log(`[${new Date().toISOString()}] DEBUG: Spawning clawdbot...`);
     const clawdbot = spawn('/home/milk/.npm-global/bin/clawdbot', cmdArgs, {
         env: { ...process.env, PATH: `/home/milk/.npm-global/bin:${process.env.PATH}` }
+    });
+
+    clawdbot.on('error', (err) => {
+        console.error(`[${new Date().toISOString()}] SPAWN ERROR: ${err.message}`);
     });
 
     let stdout = '';
     let stderr = '';
 
-    clawdbot.stdout.on('data', (data) => { stdout += data; });
-    clawdbot.stderr.on('data', (data) => { stderr += data; });
+    clawdbot.stdout.on('data', (data) => {
+        stdout += data;
+        console.log(`[STDOUT] ${data.toString().substring(0, 50)}...`);
+    });
+    clawdbot.stderr.on('data', (data) => {
+        stderr += data;
+        console.log(`[STDERR] ${data.toString().substring(0, 50)}...`);
+    });
 
-    // Polling function to check for new segments while running
+    console.log(`[${new Date().toISOString()}] DEBUG: Setting poll interval...`);
     const pollInterval = setInterval(() => {
-        const latestFile = findLatestSessionFileStats();
-        if (latestFile) {
-            const { segments, lastReadSize } = extractNewSegments(latestFile.path, currentStats);
+        try {
+            const latestFile = findLatestSessionFileStats();
+            if (latestFile) {
+                const { segments, lastReadSize } = extractNewSegments(latestFile.path, currentStats);
 
-            if (segments.length > 0) {
-                segments.forEach(seg => {
-                    if (!sentSegments.has(seg)) {
-                        console.log(`[${new Date().toISOString()}] Pushing intermediate segment...`);
-                        sendCallback(sessionId, seg);
-                        sentSegments.add(seg);
-                    }
-                });
+                if (segments.length > 0) {
+                    segments.forEach(seg => {
+                        if (!sentSegments.has(seg)) {
+                            console.log(`[${new Date().toISOString()}] Pushing segment: ${seg.substring(0, 20)}...`);
+                            sendCallback(sessionId, seg);
+                            sentSegments.add(seg);
+                        }
+                    });
+                }
+                currentStats = { ...latestFile, size: lastReadSize };
             }
-            // Update offset based on what we actually parsed
-            currentStats = { ...latestFile, size: lastReadSize };
+        } catch (pollErr) {
+            console.error(`[POLL ERROR] ${pollErr.message}`);
         }
     }, 1500);
 
@@ -143,25 +158,26 @@ app.post('/chat', async (req, res) => {
         clearInterval(pollInterval);
         console.log(`[${new Date().toISOString()}] Clawdbot process finished with code ${code}`);
 
-        // Final poll to get any remaining content
         setTimeout(() => {
-            const latestFile = findLatestSessionFileStats();
-            if (latestFile) {
-                const { segments } = extractNewSegments(latestFile.path, currentStats);
-                segments.forEach(seg => {
-                    if (!sentSegments.has(seg)) {
-                        sendCallback(sessionId, seg);
-                        sentSegments.add(seg);
-                    }
-                });
+            try {
+                const latestFile = findLatestSessionFileStats();
+                if (latestFile) {
+                    const { segments } = extractNewSegments(latestFile.path, currentStats);
+                    segments.forEach(seg => {
+                        if (!sentSegments.has(seg)) {
+                            sendCallback(sessionId, seg);
+                            sentSegments.add(seg);
+                        }
+                    });
+                }
+            } catch (finalPollErr) {
+                console.error(`[FINAL POLL ERROR] ${finalPollErr.message}`);
             }
 
-            const allSegments = Array.from(sentSegments);
-            const lastReply = allSegments.length > 0 ? allSegments[allSegments.length - 1] : "任务已完成。";
-
+            console.log(`[${new Date().toISOString()}] Sending JSON response to client`);
             res.json({
-                reply: lastReply,
-                segments_sent: allSegments.length,
+                reply: Array.from(sentSegments).pop() || "任务已完成。",
+                segments_sent: sentSegments.size,
                 is_callback_mode: true
             });
         }, 1000);
@@ -192,6 +208,8 @@ function sendCallback(sessionId, content) {
         console.log(`[CALLBACK] Response status: ${response.statusCode} for ${sessionId}`);
         response.on('data', () => { }); // Consume data
     });
+
+    request.setTimeout(5000); // 5s timeout for callback
 
     request.on('error', (error) => {
         console.error(`[CALLBACK] Error: ${error.message} for ${sessionId}`);
@@ -235,20 +253,17 @@ function extractNewSegments(filePath, beforeStats) {
         fs.closeSync(fd);
 
         const newRawContent = buffer.toString('utf8');
-        // We might have a partial line at the end. 
-        // We only process complete lines (those ending in newline).
-        const lines = newRawContent.split('\n');
+        const lastNewLineIndex = newRawContent.lastIndexOf('\n');
 
-        // The last element of split is either empty (if ended with \n) 
-        // or a partial line (if not ended with \n).
-        const lastLineComplete = newRawContent.endsWith('\n');
-        const completeLines = lastLineComplete ? lines : lines.slice(0, -1);
-
-        // Calculate how much we actually read completely
-        let completeBytes = 0;
-        if (completeLines.length > 0) {
-            completeBytes = Buffer.byteLength(completeLines.join('\n') + '\n');
+        if (lastNewLineIndex === -1) {
+            // No complete line yet
+            return { segments: [], lastReadSize: startOffset };
         }
+
+        // Exactly the bytes that form complete lines
+        const completeText = newRawContent.substring(0, lastNewLineIndex + 1);
+        const completeBytes = Buffer.byteLength(completeText);
+        const completeLines = completeText.split(/\r?\n/);
 
         const newSegments = [];
         for (const lineStr of completeLines) {

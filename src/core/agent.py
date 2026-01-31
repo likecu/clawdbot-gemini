@@ -48,7 +48,7 @@ class Agent:
         self.current_mode = AgentMode.CONVERSATION
         self.thinking_enabled = True  # 是否显示思考过程
     
-    def process_message(self, user_id: str,
+    async def process_message(self, user_id: str,
                         chat_id: str,
                         message: str) -> Dict[str, Any]:
         """
@@ -89,7 +89,7 @@ class Agent:
             self.logger.debug(f"OpenClaw session ID: {openclaw_session_id}")
             
             # 调用LLM
-            response = self._call_llm(prompt_messages, mode)
+            response = await self._call_llm(prompt_messages, mode)
             
             # 保存到会话历史
             self.session_manager.add_user_message(session_id, message)
@@ -160,7 +160,7 @@ class Agent:
         
         return intent_mode_map.get(intent, AgentMode.CONVERSATION)
     
-    def _call_llm(self, messages: List[Dict[str, str]],
+    async def _call_llm(self, messages: List[Dict[str, Any]],
                   mode: AgentMode) -> Dict[str, Any]:
         """
         调用LLM生成响应
@@ -174,20 +174,10 @@ class Agent:
         """
         # 检查是否是 clawdbot 客户端（有 async chat 方法）
         import inspect
-        import asyncio
         
         if hasattr(self.llm_client, 'chat') and inspect.iscoroutinefunction(self.llm_client.chat):
             # clawdbot 客户端（async）
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # 已经在事件循环中，需要在新线程中运行
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, self.llm_client.chat(messages))
-                    response_text = future.result()
-            else:
-                # 没有运行的事件循环，直接运行
-                response_text = asyncio.run(self.llm_client.chat(messages))
+            response_text = await self.llm_client.chat(messages)
             
             return {
                 "text": response_text,

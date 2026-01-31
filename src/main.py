@@ -150,15 +150,13 @@ class ClawdbotApplication:
                     parts = session_id.split("_")
                     if len(parts) >= 2:
                         target_id = parts[1]
-                        if self.lark_client:
-                            # 飞书消息通过 lark_client 发送
-                            from adapters.lark.models import LarkMessageRequest
-                            lark_req = LarkMessageRequest(
+                        if self.ws_client:
+                            # 飞书消息通过 ws_client 发送
+                            self.ws_client.send_text_message(
                                 receive_id=target_id,
                                 receive_id_type="chat_id",
-                                content=content
+                                text=content
                             )
-                            self.lark_client.send_message(lark_req)
                 
                 return {"status": "success"}
             except Exception as e:
@@ -367,7 +365,7 @@ class ClawdbotApplication:
             logger.error(f"初始化失败: {str(e)}")
             raise
 
-    def _handle_lark_message(self, message: ParsedMessage) -> None:
+    async def _handle_lark_message(self, message: ParsedMessage) -> None:
         """处理飞书消息"""
         try:
             logger.info(f"[Lark] 收到消息: {message.text[:50]}... (chat={message.chat_id})")
@@ -382,7 +380,7 @@ class ClawdbotApplication:
             # Looking at original code: agent.process_message(user_id, chat_id, message)
             # The agent likely handles session logic.
             
-            result = self.agent.process_message(
+            result = await self.agent.process_message(
                 user_id=message.sender_id,
                 chat_id=message.chat_id, 
                 message=message.text
@@ -421,7 +419,7 @@ class ClawdbotApplication:
             # Session ID: qq:{group_id if group else user_id}
             chat_id_val = f"group_{message.group_id}" if message.message_type == "group" else str(message.user_id)
             
-            result = self.agent.process_message(
+            result = await self.agent.process_message(
                 user_id=f"qq:{message.user_id}",
                 chat_id=f"qq:{chat_id_val}",
                 message=user_text
