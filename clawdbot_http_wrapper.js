@@ -6,11 +6,14 @@
  */
 
 const express = require('express');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const http = require('http');
 const bodyParser = require('body-parser');
+
+const CALLBACK_URL = 'http://localhost:8081/api/clawdbot/callback';
 
 const app = express();
 const port = 3009;
@@ -86,58 +89,209 @@ app.post('/chat', async (req, res) => {
     }
 
     const sessionId = session_id || 'qq_default';
-    const cmd = `export PATH=/home/milk/.npm-global/bin:$PATH && clawdbot agent --to "${sessionId}" --message "${message.replace(/"/g, '\\"')}" --timeout 30 2>&1`;
+    const enrichedMessage = `${message}\n\n(Note: You have FULL access to tools. Please use the 'exec' tool to run Python scripts or other commands to get actual results. Do NOT simulate execution.)`;
 
-    console.log(`[${new Date().toISOString()}] Processing request: ${message.substring(0, 50)}...`);
+    // Command to execute
+    const cmdArgs = [
+        'agent',
+        '--to', sessionId,
+        '--message', enrichedMessage,
+        '--deliver',
+        '--thinking', 'high',
+        '--verbose', 'on',
+        '--timeout', '180'
+    ];
 
-    // Record the current latest file before running clawdbot
-    const beforeFile = findLatestSessionFile();
-    const beforeTime = new Date();
+    console.log(`[${new Date().toISOString()}] Starting request: ${message.substring(0, 50)}...`);
 
-    exec(cmd, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
-        if (error && !stdout.includes('Completed turn')) {
-            console.error(`Error executing clawdbot: ${error.message}`);
-            return res.status(500).json({
-                error: 'Failed to execute clawdbot',
-                details: error.message
-            });
-        }
+    // Initial stats to detect new content
+    let currentStats = findLatestSessionFileStats();
+    let sentSegments = new Set();
 
-        // Wait a bit for file to be fully written
-        setTimeout(() => {
-            try {
-                // Find the session file (either the same one or a new one)
-                const latestFile = findLatestSessionFile();
+    // Start clawdbot process
+    const clawdbot = spawn('/home/milk/.npm-global/bin/clawdbot', cmdArgs, {
+        env: { ...process.env, PATH: `/home/milk/.npm-global/bin:${process.env.PATH}` }
+    });
 
-                if (!latestFile) {
-                    console.error('No session files found');
-                    return res.status(500).json({
-                        error: 'No session files found',
-                        reply: '抱歉，无法找到会话文件。'
-                    });
-                }
+    let stdout = '';
+    let stderr = '';
 
-                // Get the latest reply from the session file
-                const reply = getLatestReply(latestFile);
+    clawdbot.stdout.on('data', (data) => { stdout += data; });
+    clawdbot.stderr.on('data', (data) => { stderr += data; });
 
-                if (reply) {
-                    console.log(`[${new Date().toISOString()}] Response: ${reply.substring(0, 100)}...`);
-                    return res.json({ reply: reply });
-                } else {
-                    console.warn('Could not extract reply from session file');
-                    return res.json({ reply: '收到消息，但无法提取回复内容。' });
-                }
-            } catch (extractError) {
-                console.error(`Error extracting reply: ${extractError.message}`);
-                return res.status(500).json({
-                    error: 'Failed to extract reply',
-                    details: extractError.message,
-                    reply: '抱歉，提取回复时出错。'
+    // Polling function to check for new segments while running
+    const pollInterval = setInterval(() => {
+        const latestFile = findLatestSessionFileStats();
+        if (latestFile) {
+            const { segments, lastReadSize } = extractNewSegments(latestFile.path, currentStats);
+
+            if (segments.length > 0) {
+                segments.forEach(seg => {
+                    if (!sentSegments.has(seg)) {
+                        console.log(`[${new Date().toISOString()}] Pushing intermediate segment...`);
+                        sendCallback(sessionId, seg);
+                        sentSegments.add(seg);
+                    }
                 });
             }
-        }, 500); // Wait 500ms for file to be written
+            // Update offset based on what we actually parsed
+            currentStats = { ...latestFile, size: lastReadSize };
+        }
+    }, 1500);
+
+    clawdbot.on('close', (code) => {
+        clearInterval(pollInterval);
+        console.log(`[${new Date().toISOString()}] Clawdbot process finished with code ${code}`);
+
+        // Final poll to get any remaining content
+        setTimeout(() => {
+            const latestFile = findLatestSessionFileStats();
+            if (latestFile) {
+                const { segments } = extractNewSegments(latestFile.path, currentStats);
+                segments.forEach(seg => {
+                    if (!sentSegments.has(seg)) {
+                        sendCallback(sessionId, seg);
+                        sentSegments.add(seg);
+                    }
+                });
+            }
+
+            const allSegments = Array.from(sentSegments);
+            const lastReply = allSegments.length > 0 ? allSegments[allSegments.length - 1] : "任务已完成。";
+
+            res.json({
+                reply: lastReply,
+                segments_sent: allSegments.length,
+                is_callback_mode: true
+            });
+        }, 1000);
     });
 });
+
+// Helper to send data back to the Python app
+function sendCallback(sessionId, content) {
+    console.log(`[CALLBACK] Sending segment for ${sessionId}: ${content.substring(0, 30)}...`);
+    const data = JSON.stringify({
+        session_id: sessionId,
+        content: content
+    });
+
+    const url = new URL(CALLBACK_URL);
+    const options = {
+        hostname: url.hostname,
+        port: url.port,
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(data)
+        }
+    };
+
+    const request = http.request(options, (response) => {
+        console.log(`[CALLBACK] Response status: ${response.statusCode} for ${sessionId}`);
+        response.on('data', () => { }); // Consume data
+    });
+
+    request.on('error', (error) => {
+        console.error(`[CALLBACK] Error: ${error.message} for ${sessionId}`);
+    });
+
+    request.on('timeout', () => {
+        console.error(`[CALLBACK] Timeout for ${sessionId}`);
+        request.destroy();
+    });
+
+    request.write(data);
+    request.end();
+}
+
+function findLatestSessionFileStats() {
+    try {
+        const files = fs.readdirSync(SESSIONS_DIR)
+            .filter(f => f.endsWith('.jsonl') && !f.includes('.deleted'))
+            .map(f => {
+                const fullPath = path.join(SESSIONS_DIR, f);
+                const stats = fs.statSync(fullPath);
+                return { name: f, path: fullPath, size: stats.size, mtime: stats.mtime };
+            })
+            .sort((a, b) => b.mtime - a.mtime);
+        return files.length > 0 ? files[0] : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function extractNewSegments(filePath, beforeStats) {
+    try {
+        const stats = fs.statSync(filePath);
+        const startOffset = (beforeStats && beforeStats.path === filePath) ? beforeStats.size : 0;
+
+        if (stats.size <= startOffset) return { segments: [], lastReadSize: startOffset };
+
+        const buffer = Buffer.alloc(stats.size - startOffset);
+        const fd = fs.openSync(filePath, 'r');
+        fs.readSync(fd, buffer, 0, buffer.length, startOffset);
+        fs.closeSync(fd);
+
+        const newRawContent = buffer.toString('utf8');
+        // We might have a partial line at the end. 
+        // We only process complete lines (those ending in newline).
+        const lines = newRawContent.split('\n');
+
+        // The last element of split is either empty (if ended with \n) 
+        // or a partial line (if not ended with \n).
+        const lastLineComplete = newRawContent.endsWith('\n');
+        const completeLines = lastLineComplete ? lines : lines.slice(0, -1);
+
+        // Calculate how much we actually read completely
+        let completeBytes = 0;
+        if (completeLines.length > 0) {
+            completeBytes = Buffer.byteLength(completeLines.join('\n') + '\n');
+        }
+
+        const newSegments = [];
+        for (const lineStr of completeLines) {
+            if (!lineStr.trim()) continue;
+            try {
+                const line = JSON.parse(lineStr);
+                if (line.type !== 'message' || !line.message) continue;
+
+                const role = line.message.role;
+                const contentParts = line.message.content || [];
+
+                if (role === 'assistant') {
+                    contentParts.forEach(p => {
+                        if (p.type === 'text' && p.text.trim()) {
+                            newSegments.push(p.text.trim());
+                        }
+                        if (p.type === 'toolCall') {
+                            newSegments.push(`🛠️ **正在执行: ${p.name}**\n参数: \`${JSON.stringify(p.arguments)}\``);
+                        }
+                    });
+                } else if (role === 'toolResult') {
+                    contentParts.forEach(p => {
+                        if (p.type === 'text' && p.text.trim()) {
+                            let t = p.text.trim();
+                            if (t.length > 800) t = t.substring(0, 800) + '... (结果过长已截断)';
+                            newSegments.push(`✅ **执行结果:**\n\`\`\`\n${t}\n\`\`\``);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.log(`[DEBUG] Partial or invalid JSON skipped: ${lineStr.substring(0, 20)}...`);
+            }
+        }
+
+        return {
+            segments: newSegments,
+            lastReadSize: startOffset + completeBytes
+        };
+    } catch (error) {
+        console.error(`Error in extractNewSegments: ${error.message}`);
+        return { segments: [], lastReadSize: beforeStats ? beforeStats.size : 0 };
+    }
+}
 
 app.listen(port, () => {
     console.log(`🤖 Clawdbot HTTP Wrapper listening on port ${port}`);

@@ -78,6 +78,16 @@ class Agent:
                 history, message, include_system=True
             )
             
+            # 为 OpenClaw 添加 session_id 到消息列表
+            # 将 chat_id 转换为 OpenClaw 兼容格式
+            # 格式：qq_<user_id>_<message_type>
+            openclaw_session_id = chat_id.replace(":", "_").replace("qq_qq_", "qq_")
+            if len(prompt_messages) > 0 and isinstance(prompt_messages[0], dict):
+                # 在第一条消息中添加 session_id
+                prompt_messages[0]["session_id"] = openclaw_session_id
+            
+            self.logger.debug(f"OpenClaw session ID: {openclaw_session_id}")
+            
             # 调用LLM
             response = self._call_llm(prompt_messages, mode)
             

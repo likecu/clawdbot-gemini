@@ -100,6 +100,71 @@ class ClawdbotApplication:
                 logger.error(f"Error sending message: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
+        class ClawdbotCallbackRequest(BaseModel):
+            session_id: str
+            content: str
+
+        @self.app.post("/api/clawdbot/callback")
+        async def clawdbot_callback(data: ClawdbotCallbackRequest):
+            """
+            接收来自 Clawdbot HTTP Wrapper 的实时中间结果并转发给用户
+            """
+            try:
+                session_id = data.session_id
+                content = data.content
+                
+                if not session_id or not content:
+                    return {"status": "ignored", "reason": "missing content or session_id"}
+                
+                logger.info(f"收到 Clawdbot 实时推送 [Session: {session_id}]: {content[:50]}...")
+                
+                # 解析 session_id (格式: qq_123456_private)
+                # 我们在 Agent 中设置的是 qq_<chat_id>
+                # chat_id 可能是 qq_123456 (私聊) 或 qq_group_789 (群组)
+                
+                platform = "qq" if session_id.startswith("qq") else "lark"
+                
+                if platform == "qq":
+                    # 尝试还原 QQ ID
+                    parts = session_id.split("_")
+                    if "group" in parts:
+                        is_group = True
+                        idx = parts.index("group")
+                        target_id = parts[idx + 1] if len(parts) > idx + 1 else None
+                    else:
+                        is_group = False
+                        target_id = parts[1] if len(parts) > 1 else None
+                    
+                    if target_id:
+                        qq_req = QQMessageRequest(
+                            message_type="group" if is_group else "private",
+                            user_id=int(target_id) if not is_group else None,
+                            group_id=int(target_id) if is_group else None,
+                            message=content
+                        )
+                        if self.qq_client:
+                            self.qq_client.send_message(qq_req)
+                            await self._broadcast_ui_message(qq_req, direction="sent")
+                elif platform == "lark":
+                    # lark_chatid
+                    parts = session_id.split("_")
+                    if len(parts) >= 2:
+                        target_id = parts[1]
+                        if self.lark_client:
+                            # 飞书消息通过 lark_client 发送
+                            from adapters.lark.models import LarkMessageRequest
+                            lark_req = LarkMessageRequest(
+                                receive_id=target_id,
+                                receive_id_type="chat_id",
+                                content=content
+                            )
+                            self.lark_client.send_message(lark_req)
+                
+                return {"status": "success"}
+            except Exception as e:
+                logger.error(f"Clawdbot callback error: {e}")
+                return {"status": "error", "message": str(e)}
+
         @self.app.on_event("startup")
         async def startup_event():
             await self.initialize()
@@ -354,11 +419,11 @@ class ClawdbotApplication:
                 return
 
             # Session ID: qq:{group_id if group else user_id}
-            chat_id = str(message.group_id) if message.message_type == "group" else str(message.user_id)
+            chat_id_val = f"group_{message.group_id}" if message.message_type == "group" else str(message.user_id)
             
             result = self.agent.process_message(
                 user_id=f"qq:{message.user_id}",
-                chat_id=f"qq:{chat_id}",
+                chat_id=f"qq:{chat_id_val}",
                 message=user_text
             )
 
