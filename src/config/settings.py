@@ -93,7 +93,7 @@ class Settings:
             qwen_oauth_base_url=os.getenv("QWEN_OAUTH_BASE_URL", "https://chat.qwen.ai"),
             qwen_oauth_client_id=os.getenv("QWEN_OAUTH_CLIENT_ID", "f0304373b74a44d2b584a3fb70ca9e56"),
             
-            qwen_oauth_client_id=os.getenv("QWEN_OAUTH_CLIENT_ID", "f0304373b74a44d2b584a3fb70ca9e56"),
+
             
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
 
