@@ -145,8 +145,6 @@ class LarkWSClient:
         self._client = ws.Client(
             app_id=self.app_id,
             app_secret=self.app_secret,
-            verification_token=self.verification_token,
-            encrypt_key=self.encrypt_key,
             event_handler=default_handler,
             log_level=self.log_level
         )
