@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app/src
 
 EXPOSE 8000
 

@@ -18,10 +18,10 @@ from pydantic import BaseModel
 import uvicorn
 
 # New Channel Architecture
-from src.channels.manager import ChannelManager
-from src.channels.base import UnifiedMessage, UnifiedSendRequest
-from src.channels.lark.adapter import LarkChannel
-from src.channels.qq.adapter import QQChannel
+from channels.manager import ChannelManager
+from channels.base import UnifiedMessage, UnifiedSendRequest
+from channels.lark.adapter import LarkChannel
+from channels.qq.adapter import QQChannel
 
 from adapters.llm import init_client, OpenRouterClient
 from adapters.llm.clawdbot_client import ClawdbotClient
