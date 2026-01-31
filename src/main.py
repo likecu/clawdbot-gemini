@@ -170,6 +170,7 @@ class ClawdbotApplication:
                 
                 # Parsing extended format: platform_type_id
                 parts = session_id.split("_")
+                logger.info(f"DEBUG: session_id='{session_id}', parts={parts}")
                 if len(parts) >= 3:
                      platform = parts[0]
                      msg_type = parts[1]
@@ -181,7 +182,10 @@ class ClawdbotApplication:
                      chat_id = parts[1]
                      msg_type = "private" # default fallback
                 else:
+                     logger.error(f"DEBUG: Invalid parts length {len(parts)}")
                      return {"status": "error", "message": "Invalid session format"}
+                
+                logger.info(f"DEBUG: Parsed platform={platform}, type={msg_type}, chat_id={chat_id}")
 
                 req.message_type = msg_type
 
