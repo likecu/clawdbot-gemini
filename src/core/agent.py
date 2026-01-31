@@ -79,9 +79,11 @@ class Agent:
             )
             
             # 为 OpenClaw 添加 session_id 到消息列表
-            # 将 chat_id 转换为 OpenClaw 兼容格式
-            # 格式：qq_<user_id>_<message_type>
-            openclaw_session_id = chat_id.replace(":", "_").replace("qq_qq_", "qq_")
+            # 格式：qq_<user_id>_<chat_id>
+            # 确保 ID 只包含字母、数字和下划线，且以 qq_ 开头
+            openclaw_session_id = session_id.replace(":", "_").replace("-", "_").replace("qq_qq_", "qq_")
+            if not openclaw_session_id.startswith("qq_"):
+                openclaw_session_id = f"qq_{openclaw_session_id}"
             if len(prompt_messages) > 0 and isinstance(prompt_messages[0], dict):
                 # 在第一条消息中添加 session_id
                 prompt_messages[0]["session_id"] = openclaw_session_id
