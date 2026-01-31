@@ -5,7 +5,7 @@ import json
 import threading
 
 from ..base import BaseChannel, UnifiedMessage, UnifiedSendRequest
-from src.adapters.lark.lark_client import LarkWSClient
+from adapters.lark.lark_client import LarkWSClient
 
 logger = logging.getLogger("LarkChannel")
 

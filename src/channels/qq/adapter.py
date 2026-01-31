@@ -6,8 +6,8 @@ from typing import Callable, Optional
 from ..base import BaseChannel, UnifiedMessage, UnifiedSendRequest
 
 # We can import NapCatClient but might need modification
-from src.adapters.qq.client import NapCatClient
-from src.adapters.qq.models import QQMessage, MessageRequest
+from adapters.qq.client import NapCatClient
+from adapters.qq.models import QQMessage, MessageRequest
 
 logger = logging.getLogger("QQChannel")
 
