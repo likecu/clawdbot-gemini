@@ -3,6 +3,10 @@ import logging
 import asyncio
 import json
 import threading
+import sys
+import os
+import uuid
+from io import BytesIO
 
 from ..base import BaseChannel, UnifiedMessage, UnifiedSendRequest
 from adapters.lark.lark_client import LarkWSClient
@@ -66,65 +70,32 @@ class LarkChannel(BaseChannel):
             if not self.client.is_connected():
                 logger.warning("Lark client not connected, attempting to send anyway (might fail)")
 
-            # Convert UnifiedSendRequest specialized for Lark
-            # receive_id_type defaults to "open_id" usually, but for group chats we might need "chat_id"
-            # Our UnifiedMessage stores chat_id as the primary identifier.
-            # We need to determine if it's a chat_id or open_id. 
-            # Simplified heuristic: assume chat_id if request.chat_id starts with 'oc_' (common for groups) 
-            # or just use receive_id_type="chat_id" which works for both P2P chats and Group chats in some contexts?
-            # Actually create_message allows receive_id_type="chat_id"
-            
-            # If the original message was from a group, we should reply to the group (chat_id).
-            
-            # Simple approach: Always use "chat_id" for receive_id_type if possible, 
-            # but usually for private messages we use open_id.
-            
-            # Let's rely on the metadata if available or just try.
-            # The client.send_text_message implementation uses receive_id_type="open_id" by default inside (if not specified).
-            # But wait, looking at my refactored send_text_message in lark_client.py:
-            # It calls send_message(receive_id, content) which calls CreateMessageRequest... receive_id_type("open_id") HARDCODED in line 233.
-            # This is a limitation of the existing client I need to work around or fix.
-            
-            # I will modify the call to `send_message` on the client to support `chat_id` if I can, 
-            # or I'll override the method here if the client exposes enough.
-            
-            # Actually, let's use the `send_text_message` method if it's text.
-            # But the underlying `send_message` in LarkWSClient hardcodes "open_id". 
-            # I should probably fix LarkWSClient to accept receive_id_type or handle it here if I access the protected _client.
-            
-            # For now, let's assume `send_text_message` works or I will patch `LarkWSClient` in a separate step if needed. 
-            # Wait, `LarkWSClient.send_text_message` in current codebase calls `send_message` which hardcodes `open_id`.
-            # This is a BUG in the existing code if we want to support groups (chat_id).
-            # I will fix `src/channels/lark/adapter.py` by implementing a proper send using the raw _client if needed, 
-            # effectively bypassing the helper method if it's broken.
-            
-            # Let's inspect `LarkWSClient` again... 
-            # Yes, line 233: .receive_id_type("open_id")
-            
-            # Strategy: Implement proper sending logic here using the `lark-oapi` library directly if possible,
-            # since `self.client._client` is the `ws.Client` which might expose the API client?
-            # `ws.Client` usually has an `im` property for API access? No, ws.Client is for WebSocket.
-            # The API client is usually separate. 
-            # BUT `LarkWSClient` initializes `ws.Client`. `ws.Client` in `lark_oapi` 2.x+ combines both?
-            # Actually `lark_oapi.Client` is for API, `lark_oapi.ws.Client` is for WS.
-            # The existing code sends messages via `self._client.im.v1.message.create`. 
-            # So `self.client._client` IS able to send messages.
-
             from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
             import uuid
+
+            msg_type = "text"
+            content_dict = {}
 
             if request.message_type == "text":
                 content_dict = {"text": request.content}
                 msg_type = "text"
+            elif request.message_type == "image":
+                 # 假设 request.content 是 image_key，或者我们需要上传？
+                 # 这里简化处理，假设 request.content 就是 image_key
+                 content_dict = {"image_key": request.content}
+                 msg_type = "image"
             else:
                 # Fallback / TODO: support other types
                 content_dict = {"text": f"[Unsupported type: {request.message_type}] {request.content}"}
                 msg_type = "text"
 
             # Determine receive_id_type
-            # If it looks like a UUID or specific format?
-            # For now, let's try "chat_id" as default for our unified system as 'chat_id' usually implies the conversation container.
-            receive_id_type = "chat_id" 
+            # 默认优先使用 chat_id，如果 request.chat_id 看起来像 open_id (ou_开头) 则使用 open_id
+            # 实际上 Lark 的 chat_id (oc_开头) 和 open_id (ou_开头) 格式很明显
+            
+            receive_id_type = "chat_id"
+            if request.chat_id.startswith("ou_"):
+                receive_id_type = "open_id"
             
             # Construction of request
             req = (CreateMessageRequest.builder()
@@ -137,6 +108,7 @@ class LarkChannel(BaseChannel):
                        .build())
                    .build())
 
+            # 使用 _client 直接发送，绕过 self.client.send_message 的限制
             resp = self.client._client.im.v1.message.create(req)
             
             if resp.code == 0:
@@ -163,11 +135,33 @@ class LarkChannel(BaseChannel):
             message = event.get("message", {})
             sender = event.get("sender", {})
             
+            msg_type = message.get("message_type", "text")
             msg_content = message.get("content", "{}")
+            text = ""
+            
+            logger.info(f"Receiving Lark Message: type={msg_type}, content_preview={msg_content[:100]}...")
+
             try:
                 content_json = json.loads(msg_content)
-                text = content_json.get("text", "")
-            except:
+                
+                # Check for image_key regardless of reported type (fallback)
+                image_key = content_json.get("image_key")
+                
+                if msg_type == "text":
+                    text = content_json.get("text", "")
+                elif msg_type == "image" or image_key:
+                    if not image_key:
+                        logger.warning("Message type is image but no image_key found")
+                        return
+
+                    message_id = message.get("message_id")
+                    logger.info(f"Detected Image Message! key={image_key}, starting process task.")
+                    
+                    # 异步处理图片下载和识别
+                    asyncio.create_task(self._process_image_message(message_id, image_key, chat_id or sender_id))
+                    return # Handled
+            except Exception as e:
+                logger.error(f"Error parsing message content: {e}")
                 text = str(msg_content)
 
             chat_id = message.get("chat_id")
@@ -196,3 +190,100 @@ class LarkChannel(BaseChannel):
 
         except Exception as e:
             logger.error(f"Error handling Lark event: {e}")
+
+    async def _process_image_message(self, message_id: str, image_key: str, chat_id: str):
+        """
+        处理图片消息：下载 -> OCR -> 回复
+        """
+        try:
+            logger.info(f"开始处理图片消息: {message_id}, key: {image_key}")
+            
+            # 1. 立即回复"正在分析图片..."
+            await self.send_message(UnifiedSendRequest(
+                chat_id=chat_id,
+                message_type="text",
+                content="👀 收到图片，正在使用 Gemini 进行语义分析..."
+            ))
+            
+            # 2. 下载图片
+            image_data = self.client.get_message_resource(message_id, image_key, "image")
+            if not image_data:
+                await self.send_message(UnifiedSendRequest(
+                    chat_id=chat_id,
+                    message_type="text",
+                    content="❌ 图片下载失败，请重试。"
+                ))
+                return
+
+            # 3. 保存临时文件
+            temp_path = f"/tmp/lark_img_{message_id}.jpg"
+            with open(temp_path, "wb") as f:
+                f.write(image_data)
+            
+            logger.info(f"图片已保存到: {temp_path}")
+
+            # 4. 调用 Gemini OCR
+            try:
+                from config import get_settings
+                from adapters.gemini.gemini_ocr import GeminiOCR
+                
+                settings = get_settings()
+                # 初始化 OCR (优先使用配置的 Key)
+                ocr = GeminiOCR(api_key=settings.gemini_api_key)
+                
+                
+                # 在线程池中运行识别，避免阻塞异步循环
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    None, 
+                    lambda: ocr.recognize_image(temp_path, "请详细描述这张图片的内容，如果包含文字请提取出来。")
+                )
+                
+                if result and result.get("success"):
+                    response_text = result.get("response", "识别成功，但没有返回内容")
+                    
+                    # 5. 回复识别结果
+                    await self.send_message(UnifiedSendRequest(
+                        chat_id=chat_id,
+                        message_type="text",
+                        content=f"📝 **图片分析结果**:\n\n{response_text}"
+                    ))
+                    
+                    # 6. (可选) 重新上传图片并发送，演示发送图片能力
+                    # new_image_key = self.client.upload_image(image_data)
+                    # if new_image_key:
+                    #     await self.send_message(UnifiedSendRequest(
+                    #         chat_id=chat_id,
+                    #         message_type="image",
+                    #         content=new_image_key
+                    #     ))
+                else:
+                    await self.send_message(UnifiedSendRequest(
+                        chat_id=chat_id,
+                        message_type="text",
+                        content="⚠️ 图片识别失败，可能是 API 限额或网络问题。"
+                    ))
+
+            except ImportError:
+                logger.error("无法导入 gemini_ocr，请检查路径")
+                await self.send_message(UnifiedSendRequest(
+                        chat_id=chat_id,
+                        message_type="text",
+                        content="⚠️ 系统配置错误：无法加载 OCR 模块。"
+                    ))
+            except Exception as e:
+                logger.error(f"OCR 过程出错: {e}")
+                await self.send_message(UnifiedSendRequest(
+                        chat_id=chat_id,
+                        message_type="text",
+                        content=f"⚠️ 处理出错: {str(e)}"
+                    ))
+            
+            # 清理临时文件
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+
+        except Exception as e:
+            logger.error(f"处理图片消息流程异常: {e}")
