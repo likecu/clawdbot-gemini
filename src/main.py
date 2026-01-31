@@ -167,10 +167,8 @@ class ClawdbotApplication:
                 # Actually, in _handle_unified_message, we set session_id. 
                 # If we include type in session_id: "qq:group:123" or "qq:private:456".
                 # Let's adjust _handle_unified_message to use "platform:type:id" or similar to be robust.
-                
                 # Parsing extended format: platform_type_id
                 parts = session_id.split("_")
-                logger.info(f"DEBUG: session_id='{session_id}', parts={parts}")
                 if len(parts) >= 3:
                      platform = parts[0]
                      msg_type = parts[1]
@@ -182,11 +180,8 @@ class ClawdbotApplication:
                      chat_id = parts[1]
                      msg_type = "private" # default fallback
                 else:
-                     logger.error(f"DEBUG: Invalid parts length {len(parts)}")
                      return {"status": "error", "message": "Invalid session format"}
                 
-                logger.info(f"DEBUG: Parsed platform={platform}, type={msg_type}, chat_id={chat_id}")
-
                 req.message_type = msg_type
                 req.chat_id = chat_id
 
