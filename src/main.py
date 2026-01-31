@@ -168,13 +168,15 @@ class ClawdbotApplication:
                 # If we include type in session_id: "qq:group:123" or "qq:private:456".
                 # Let's adjust _handle_unified_message to use "platform:type:id" or similar to be robust.
                 
-                # Parsing extended format: platform:type:id
-                parts = session_id.split(":")
+                # Parsing extended format: platform_type_id
+                parts = session_id.split("_")
                 if len(parts) >= 3:
                      platform = parts[0]
                      msg_type = parts[1]
-                     chat_id = parts[2]
+                     # Join the rest in case chat_id has underscores
+                     chat_id = "_".join(parts[2:])
                 elif len(parts) == 2:
+                     # Legacy or simple format fallback
                      platform = parts[0]
                      chat_id = parts[1]
                      msg_type = "private" # default fallback
@@ -363,12 +365,10 @@ class ClawdbotApplication:
             logger.info(f"[{message.platform}] Received: {user_text} from {message.user_id} in {message.chat_id}")
 
             # 3. Construct Session ID
-            # IMPORTANT: We encourage "platform:type:chat_id" to make callback routing reliable
-            # For QQ: "qq:group:123" or "qq:private:456"
-            # For Lark: "lark:private:oc_123..." (Lark uses chat_id for everything, msg_type distinguishes)
+            # IMPORTANT: Use underscores to avoid file system issues and parsing ambiguity
+            # Format: "{platform}_{message_type}_{chat_id}"
             
-            # Actually, message.message_type is 'group' or 'private'.
-            session_id = f"{message.platform}:{message.message_type}:{message.chat_id}"
+            session_id = f"{message.platform}_{message.message_type}_{message.chat_id}"
             
             # 4. Agent Processing
             # Note: Agent expects user_id and chat_id. We can pass the composite session_id as chat_id or handle it.
