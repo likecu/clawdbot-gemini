@@ -99,14 +99,55 @@ class LarkWSClient:
         self.logger.info("正在创建飞书WebSocket客户端...")
         
         def default_handler(event):
-            event_type = getattr(event, "type", "unknown")
-            handler = self._event_handlers.get(event_type)
-            if handler:
-                handler(event)
+            try:
+                self.logger.info(f"收到飞书事件: type={type(event)}")
+                
+                # 尝试提取事件类型
+                event_type = "unknown"
+                event_dict = {}
+                
+                # 如果是 dict
+                if isinstance(event, dict):
+                    event_dict = event
+                    event_type = event.get("header", {}).get("event_type", "unknown")
+                    # Fallback for some events
+                    if event_type == "unknown":
+                        event_type = event.get("type", "unknown")
+                
+                # 如果是对象，尝试转为 dict
+                else:
+                    # 尝试获取 header.event_type
+                    header = getattr(event, "header", None)
+                    if header:
+                        event_type = getattr(header, "event_type", "unknown")
+                    
+                    # 尝试转为 dict
+                    if hasattr(event, "__dict__"):
+                        event_dict = event.__dict__
+                    elif hasattr(event, "data"): # 某些 SDK 封装
+                         event_dict = event.data
+                    
+                    # 如果转失败，记录
+                    if not event_dict:
+                        self.logger.warning(f"无法将事件对象转为字典: {dir(event)}")
+                        return
+
+                self.logger.info(f"处理事件类型: {event_type}")
+                
+                handler = self._event_handlers.get(event_type)
+                if handler:
+                    handler(event_dict)
+                else:
+                     self.logger.debug(f"未找到处理器: {event_type}")
+            except Exception as e:
+                self.logger.error(f"事件处理异常: {e}")
         
         self._client = ws.Client(
             app_id=self.app_id,
             app_secret=self.app_secret,
+            verification_token=self.verification_token,
+            encrypt_key=self.encrypt_key,
+            event_handler=default_handler,
             log_level=self.log_level
         )
         
