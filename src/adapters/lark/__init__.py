@@ -12,12 +12,12 @@ from .message_converter import (
 
 from .event_handler import (
     create_event_handler,
-    EventDispatcher
+    EventDispatcher,
+    ParsedMessage
 )
 
 from .lark_client import (
-    LarkWSClient,
-    create_ws_client
+    LarkWSClient
 )
 
 __all__ = [
@@ -26,6 +26,6 @@ __all__ = [
     'format_code_block',
     'create_event_handler',
     'EventDispatcher',
-    'LarkWSClient',
-    'create_ws_client'
+    'ParsedMessage',
+    'LarkWSClient'
 ]

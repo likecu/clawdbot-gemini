@@ -41,6 +41,13 @@ class Settings:
     
     # 模型选择
     active_model: str = "qwen"  # openrouter, deepseek, 或 qwen
+
+    # QQ配置
+    qq_bot_enabled: bool = False
+    qq_host: str = "localhost"
+    qq_http_port: int = 3000
+    qq_ws_port: int = 3001
+
     
     # Redis配置
     redis_host: str = "localhost"
@@ -85,13 +92,18 @@ class Settings:
             
             active_model=os.getenv("ACTIVE_MODEL", "qwen"),
             
+            qq_bot_enabled=os.getenv("QQ_BOT_ENABLED", "false").lower() == "true",
+            qq_host=os.getenv("QQ_HOST", "localhost"),
+            qq_http_port=int(os.getenv("QQ_HTTP_PORT", 3000)),
+            qq_ws_port=int(os.getenv("QQ_WS_PORT", 8080)),
+            
             redis_host=os.getenv("REDIS_HOST", "localhost"),
             redis_port=int(os.getenv("REDIS_PORT", 6379)),
             redis_db=int(os.getenv("REDIS_DB", 0)),
             redis_password=os.getenv("REDIS_PASSWORD"),
             
             app_host=os.getenv("APP_HOST", "0.0.0.0"),
-            app_port=int(os.getenv("APP_PORT", 8000)),
+            app_port=int(os.getenv("APP_PORT", 8081)),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             
             session_max_history=int(os.getenv("SESSION_MAX_HISTORY", 10))

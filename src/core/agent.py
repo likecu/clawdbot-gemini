@@ -162,7 +162,28 @@ class Agent:
         Returns:
             Dict: 包含响应文本和使用信息的字典
         """
-        if hasattr(self.llm_client, 'chat_with_thinking'):
+        # 检查是否是 clawdbot 客户端（有 async chat 方法）
+        import inspect
+        import asyncio
+        
+        if hasattr(self.llm_client, 'chat') and inspect.iscoroutinefunction(self.llm_client.chat):
+            # clawdbot 客户端（async）
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 已经在事件循环中，需要在新线程中运行
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, self.llm_client.chat(messages))
+                    response_text = future.result()
+            else:
+                # 没有运行的事件循环，直接运行
+                response_text = asyncio.run(self.llm_client.chat(messages))
+            
+            return {
+                "text": response_text,
+                "usage": {}
+            }
+        elif hasattr(self.llm_client, 'chat_with_thinking'):
             # 支持推理模型的客户端
             response = self.llm_client.chat_with_thinking(
                 message=messages[-1]["content"],
