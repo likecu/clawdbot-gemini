@@ -188,6 +188,7 @@ class ClawdbotApplication:
                 logger.info(f"DEBUG: Parsed platform={platform}, type={msg_type}, chat_id={chat_id}")
 
                 req.message_type = msg_type
+                req.chat_id = chat_id
 
                 success = await self.channel_manager.send_message(platform, req)
                 
