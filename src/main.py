@@ -381,13 +381,18 @@ class ClawdbotApplication:
                             if img_source.startswith("http"):
                                 # QQ 渠道的 URL 模式: 下载
                                 logger.info(f"[OCR] 正在从 URL 下载图片: {img_source[:50]}...")
+                                headers = {
+                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                                    "Referer": "https://q.qq.com/"
+                                }
                                 async with aiohttp.ClientSession() as session:
-                                    async with session.get(img_source, timeout=30) as resp:
+                                    async with session.get(img_source, headers=headers, timeout=30) as resp:
                                         if resp.status == 200:
                                             with open(temp_path, "wb") as f:
                                                 f.write(await resp.read())
                                         else:
                                             logger.error(f"[OCR] 下载失败: HTTP {resp.status}")
+                                            ocr_results.append(f"--- 图片 {idx+1} 获取失败 (HTTP {resp.status}) ---")
                                             continue
                             else:
                                 # 飞书渠道的本地路径模式
@@ -415,9 +420,14 @@ class ClawdbotApplication:
                         combined_ocr = "\n\n".join(ocr_results)
                         user_text = f"{user_text}\n\n[图片分析报告]:\n{combined_ocr}"
                         logger.info(f"[OCR] 成功将 OCR 结果注入消息，识别内容长度: {len(combined_ocr)}")
+                    elif not user_text:
+                        # OCR 失败且无其他文本内容的兜底
+                        user_text = f"{user_text}\n[系统通知: 收到图片但 OCR 解析失败，请联系用户确认图片内容]"
                 
                 except Exception as ocr_err:
                     logger.error(f"[OCR] 全局 OCR 处理链崩溃: {ocr_err}")
+                    if not user_text:
+                        user_text = "[系统错误: OCR 模块异常]"
             
             if not user_text and not message.images:
                 return

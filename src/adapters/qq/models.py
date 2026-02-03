@@ -32,9 +32,18 @@ class QQMessage(BaseModel):
         if isinstance(self.message, str):
             return self.message
         if isinstance(self.message, list):
-            # Extract text from segments
-            text_segments = [seg.get('data', {}).get('text', '') for seg in self.message if seg.get('type') == 'text']
-            return ''.join(text_segments)
+            # 重构消息串，包含文本和CQ码
+            parts = []
+            for seg in self.message:
+                seg_type = seg.get('type')
+                data = seg.get('data', {})
+                if seg_type == 'text':
+                    parts.append(data.get('text', ''))
+                elif seg_type:
+                    # 将其他类型转回 CQ 码格式
+                    params = ','.join([f"{k}={v}" for k, v in data.items()])
+                    parts.append(f"[CQ:{seg_type},{params}]")
+            return ''.join(parts)
         return ""
     time: int
     self_id: int
