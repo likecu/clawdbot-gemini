@@ -9,3 +9,4 @@ redis
 pydantic-settings
 docker
 aiohttp
+google-genai

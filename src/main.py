@@ -360,34 +360,77 @@ class ClawdbotApplication:
             
             user_text = message.content or ""
             
-            # 3. 处理图片URL
-            # 如果消息包含图片，将URL附加到消息文本中
+            # 3. 处理图片（全局图片识别拦截器）
             if message.images and len(message.images) > 0:
-                # 为每张图片添加URL
-                image_text = "\n".join([f"[图片: {url}]" for url in message.images])
-                if user_text:
-                    user_text = f"{user_text}\n{image_text}"
-                else:
-                    user_text = image_text
+                logger.info(f"[OCR] 开始处理 {len(message.images)} 张图片...")
+                ocr_results = []
+                
+                try:
+                    from config.settings import get_settings
+                    from adapters.gemini.gemini_ocr import GeminiOCR
+                    import aiohttp
+                    
+                    settings = get_settings()
+                    ocr = GeminiOCR(api_key=settings.gemini_api_key)
+                    
+                    for idx, img_source in enumerate(message.images):
+                        try:
+                            temp_path = f"/tmp/unified_img_{message.platform}_{idx}_{message.timestamp}.jpg"
+                            
+                            # 处理不同来源的图片
+                            if img_source.startswith("http"):
+                                # QQ 渠道的 URL 模式: 下载
+                                logger.info(f"[OCR] 正在从 URL 下载图片: {img_source[:50]}...")
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.get(img_source, timeout=30) as resp:
+                                        if resp.status == 200:
+                                            with open(temp_path, "wb") as f:
+                                                f.write(await resp.read())
+                                        else:
+                                            logger.error(f"[OCR] 下载失败: HTTP {resp.status}")
+                                            continue
+                            else:
+                                # 飞书渠道的本地路径模式
+                                temp_path = img_source
+                            
+                            # 执行 OCR 识别
+                            if os.path.exists(temp_path):
+                                logger.info(f"[OCR] 正在执行 Gemini 识别: {temp_path}")
+                                loop = asyncio.get_running_loop()
+                                result = await loop.run_in_executor(
+                                    None, 
+                                    lambda: ocr.recognize_image(temp_path, "请详细描述这张图片的内容，如果包含文字请提取出来并保持原有排版。")
+                                )
+                                
+                                if result and result.get("success"):
+                                    ocr_text = result.get("response", "")
+                                    ocr_results.append(f"--- 图片 {idx+1} 识别结果 ---\n{ocr_text}")
+                                else:
+                                    ocr_results.append(f"--- 图片 {idx+1} 识别失败 ---")
+                        except Exception as img_err:
+                            logger.error(f"[OCR] 处理单张图片失败: {img_err}")
+                    
+                    # 4. 注入 OCR 结果到用户文本中
+                    if ocr_results:
+                        combined_ocr = "\n\n".join(ocr_results)
+                        user_text = f"{user_text}\n\n[图片分析报告]:\n{combined_ocr}"
+                        logger.info(f"[OCR] 成功将 OCR 结果注入消息，识别内容长度: {len(combined_ocr)}")
+                
+                except Exception as ocr_err:
+                    logger.error(f"[OCR] 全局 OCR 处理链崩溃: {ocr_err}")
             
-            if not user_text:
+            if not user_text and not message.images:
                 return
 
-            logger.info(f"[{message.platform}] Received: {user_text} from {message.user_id} in {message.chat_id}")
+            logger.info(f"[{message.platform}] Received: {user_text[:100]}... from {message.user_id} in {message.chat_id}")
 
-            # 4. Construct Session ID
-            # IMPORTANT: Use underscores to avoid file system issues and parsing ambiguity
-            # Format: "{platform}_{message_type}_{chat_id}"
-            
+            # 5. Construct Session ID
             session_id = f"{message.platform}_{message.message_type}_{message.chat_id}"
             
-            # 5. Agent Processing
-            # Note: Agent expects user_id and chat_id. We can pass the composite session_id as chat_id or handle it.
-            # The agent uses chat_id to query session history. So "qq:group:123" is unique and good.
-            
+            # 6. Agent Processing
             result = await self.agent.process_message(
                 user_id=f"{message.platform}:{message.user_id}",
-                chat_id=session_id, # Use full session ID as the key for history
+                chat_id=session_id,
                 message=user_text
             )
 

@@ -22,10 +22,16 @@ class GeminiOCR:
         if api_key:
             self.api_key = api_key
             self.current_key_index = -1
-        else:
+        elif GEMINI_API_KEYS:
             # 随机选择一个API密钥
             self.current_key_index = random.randint(0, len(GEMINI_API_KEYS) - 1)
             self.api_key = GEMINI_API_KEYS[self.current_key_index]
+        else:
+            # 如果都没有，尝试从环境变量获取
+            self.api_key = os.getenv("GEMINI_API_KEY")
+            if not self.api_key:
+                raise ValueError("未提供 Gemini API Key，且 GEMINI_API_KEYS 列表为空，环境变量 GEMINI_API_KEY 也未设置。")
+            self.current_key_index = -1
         
         # 创建客户端实例
         self.client = genai.Client(api_key=self.api_key)
