@@ -148,12 +148,14 @@ class LarkChannel(BaseChannel):
             try:
                 content_json = json.loads(msg_content)
                 
-                # Check for image_key regardless of reported type (fallback)
+                # 提取各类型资源的key
                 image_key = content_json.get("image_key")
+                file_key = content_json.get("file_key")
                 
                 if msg_type == "text":
                     text = content_json.get("text", "")
                 elif msg_type == "image" or image_key:
+                    # 处理图片消息
                     if not image_key:
                         logger.warning("Message type is image but no image_key found")
                         return
@@ -161,15 +163,85 @@ class LarkChannel(BaseChannel):
                     message_id = message.get("message_id")
                     logger.info(f"Detected Image Message! key={image_key}, starting process task.")
                     
-                    # 使用已定义的 chat_id 和 sender_id 进行图片处理
                     target_id = chat_id or sender_id
                     if not target_id:
                         logger.error("Cannot process image: both chat_id and sender_id are None")
                         return
                     
-                    # 异步处理图片下载和识别
-                    asyncio.create_task(self._process_image_message(message_id, image_key, target_id))
-                    return # Handled
+                    asyncio.create_task(self._process_file_message(
+                        message_id=message_id,
+                        file_key=image_key,
+                        chat_id=target_id,
+                        file_type="image"
+                    ))
+                    return
+                elif msg_type == "file":
+                    # 处理文件消息(文档、PDF等)
+                    if not file_key:
+                        logger.warning("Message type is file but no file_key found")
+                        return
+                    
+                    message_id = message.get("message_id")
+                    file_name = content_json.get("file_name", "unknown_file")
+                    logger.info(f"Detected File Message! key={file_key}, name={file_name}")
+                    
+                    target_id = chat_id or sender_id
+                    if not target_id:
+                        logger.error("Cannot process file: both chat_id and sender_id are None")
+                        return
+                    
+                    asyncio.create_task(self._process_file_message(
+                        message_id=message_id,
+                        file_key=file_key,
+                        chat_id=target_id,
+                        file_type="file",
+                        file_name=file_name
+                    ))
+                    return
+                elif msg_type == "audio":
+                    # 处理音频消息
+                    audio_key = content_json.get("file_key")
+                    if not audio_key:
+                        logger.warning("Message type is audio but no file_key found")
+                        return
+                    
+                    message_id = message.get("message_id")
+                    logger.info(f"Detected Audio Message! key={audio_key}")
+                    
+                    target_id = chat_id or sender_id
+                    if not target_id:
+                        logger.error("Cannot process audio: both chat_id and sender_id are None")
+                        return
+                    
+                    asyncio.create_task(self._process_file_message(
+                        message_id=message_id,
+                        file_key=audio_key,
+                        chat_id=target_id,
+                        file_type="audio"
+                    ))
+                    return
+                elif msg_type == "media":
+                    # 处理视频消息
+                    media_key = content_json.get("file_key")
+                    if not media_key:
+                        logger.warning("Message type is media but no file_key found")
+                        return
+                    
+                    message_id = message.get("message_id")
+                    logger.info(f"Detected Media Message! key={media_key}")
+                    
+                    target_id = chat_id or sender_id
+                    if not target_id:
+                        logger.error("Cannot process media: both chat_id and sender_id are None")
+                        return
+                    
+                    asyncio.create_task(self._process_file_message(
+                        message_id=message_id,
+                        file_key=media_key,
+                        chat_id=target_id,
+                        file_type="media"
+                    ))
+                    return
             except Exception as e:
                 logger.error(f"Error parsing message content: {e}")
                 text = str(msg_content)
@@ -198,99 +270,189 @@ class LarkChannel(BaseChannel):
         except Exception as e:
             logger.error(f"Error handling Lark event: {e}")
 
-    async def _process_image_message(self, message_id: str, image_key: str, chat_id: str):
+    async def _process_file_message(
+        self, 
+        message_id: str, 
+        file_key: str, 
+        chat_id: str,
+        file_type: str = "image",
+        file_name: str = None
+    ):
         """
-        处理图片消息：下载 -> OCR -> 回复
+        处理各类型文件消息：下载 -> 处理 -> 回复
+        
+        Args:
+            message_id: 消息ID
+            file_key: 文件Key
+            chat_id: 聊天ID
+            file_type: 文件类型 (image/file/audio/media)
+            file_name: 文件名(仅file类型需要)
         """
         try:
-            logger.info(f"开始处理图片消息: {message_id}, key: {image_key}")
+            logger.info(f"开始处理{file_type}消息: {message_id}, key: {file_key}")
             
-            # 1. 立即回复"正在分析图片..."
+            # 根据文件类型发送不同的处理提示
+            type_emoji = {"image": "🖼️", "file": "📄", "audio": "🎵", "media": "🎬"}
+            type_name = {"image": "图片", "file": "文件", "audio": "音频", "media": "视频"}
+            
             await self.send_message(UnifiedSendRequest(
                 chat_id=chat_id,
                 message_type="text",
-                content="👀 收到图片，正在使用 Gemini 进行语义分析..."
+                content=f"{type_emoji.get(file_type, '📎')} 收到{type_name.get(file_type, '文件')}，正在处理..."
             ))
             
-            # 2. 下载图片
-            image_data = self.client.get_message_resource(message_id, image_key, "image")
-            if not image_data:
+            # 下载文件
+            resource_type = "file" if file_type in ["file", "audio", "media"] else "image"
+            file_data = self.client.get_message_resource(message_id, file_key, resource_type)
+            
+            if not file_data:
                 await self.send_message(UnifiedSendRequest(
                     chat_id=chat_id,
                     message_type="text",
-                    content="❌ 图片下载失败，请重试。"
+                    content=f"❌ {type_name.get(file_type, '文件')}下载失败，请重试。"
                 ))
                 return
 
-            # 3. 保存临时文件
-            temp_path = f"/tmp/lark_img_{message_id}.jpg"
-            with open(temp_path, "wb") as f:
-                f.write(image_data)
+            # 确定文件扩展名和保存路径
+            if file_type == "image":
+                ext = ".jpg"
+            elif file_type == "audio":
+                ext = ".mp3"
+            elif file_type == "media":
+                ext = ".mp4"
+            elif file_name:
+                ext = os.path.splitext(file_name)[1] or ".bin"
+            else:
+                ext = ".bin"
             
-            logger.info(f"图片已保存到: {temp_path}")
+            temp_path = f"/tmp/lark_{file_type}_{message_id}{ext}"
+            with open(temp_path, "wb") as f:
+                f.write(file_data)
+            
+            logger.info(f"{type_name.get(file_type, '文件')}已保存到: {temp_path}, 大小: {len(file_data)} bytes")
 
-            # 4. 调用 Gemini OCR
-            try:
-                from config import get_settings
-                from adapters.gemini.gemini_ocr import GeminiOCR
-                
-                settings = get_settings()
-                # 初始化 OCR (优先使用配置的 Key)
-                ocr = GeminiOCR(api_key=settings.gemini_api_key)
-                
-                
-                # 在线程池中运行识别，避免阻塞异步循环
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(
-                    None, 
-                    lambda: ocr.recognize_image(temp_path, "请详细描述这张图片的内容，如果包含文字请提取出来。")
-                )
-                
-                if result and result.get("success"):
-                    response_text = result.get("response", "识别成功，但没有返回内容")
-                    
-                    # 5. 回复识别结果
-                    await self.send_message(UnifiedSendRequest(
-                        chat_id=chat_id,
-                        message_type="text",
-                        content=f"📝 **图片分析结果**:\n\n{response_text}"
-                    ))
-                    
-                    # 6. (可选) 重新上传图片并发送，演示发送图片能力
-                    # new_image_key = self.client.upload_image(image_data)
-                    # if new_image_key:
-                    #     await self.send_message(UnifiedSendRequest(
-                    #         chat_id=chat_id,
-                    #         message_type="image",
-                    #         content=new_image_key
-                    #     ))
-                else:
-                    await self.send_message(UnifiedSendRequest(
-                        chat_id=chat_id,
-                        message_type="text",
-                        content="⚠️ 图片识别失败，可能是 API 限额或网络问题。"
-                    ))
-
-            except ImportError:
-                logger.error("无法导入 gemini_ocr，请检查路径")
-                await self.send_message(UnifiedSendRequest(
-                        chat_id=chat_id,
-                        message_type="text",
-                        content="⚠️ 系统配置错误：无法加载 OCR 模块。"
-                    ))
-            except Exception as e:
-                logger.error(f"OCR 过程出错: {e}")
-                await self.send_message(UnifiedSendRequest(
-                        chat_id=chat_id,
-                        message_type="text",
-                        content=f"⚠️ 处理出错: {str(e)}"
-                    ))
+            # 根据文件类型进行不同处理
+            if file_type == "image":
+                await self._process_image_with_gemini(temp_path, chat_id)
+            elif file_type == "file":
+                await self._process_document_file(temp_path, file_name, chat_id)
+            elif file_type == "audio":
+                await self._process_audio_file(temp_path, chat_id)
+            elif file_type == "media":
+                await self._process_media_file(temp_path, chat_id)
             
             # 清理临时文件
             try:
                 os.remove(temp_path)
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"清理临时文件失败: {e}")
 
         except Exception as e:
-            logger.error(f"处理图片消息流程异常: {e}")
+            logger.error(f"处理{file_type}消息流程异常: {e}")
+            await self.send_message(UnifiedSendRequest(
+                chat_id=chat_id,
+                message_type="text",
+                content=f"⚠️ 处理出错: {str(e)}"
+            ))
+
+    async def _process_image_with_gemini(self, temp_path: str, chat_id: str):
+        """
+        使用Gemini处理图片
+        
+        Args:
+            temp_path: 临时文件路径
+            chat_id: 聊天ID
+        """
+        try:
+            from config import get_settings
+            from adapters.gemini.gemini_ocr import GeminiOCR
+            
+            settings = get_settings()
+            ocr = GeminiOCR(api_key=settings.gemini_api_key)
+            
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None, 
+                lambda: ocr.recognize_image(temp_path, "请详细描述这张图片的内容，如果包含文字请提取出来。")
+            )
+            
+            if result and result.get("success"):
+                response_text = result.get("response", "识别成功，但没有返回内容")
+                await self.send_message(UnifiedSendRequest(
+                    chat_id=chat_id,
+                    message_type="text",
+                    content=f"📝 **图片分析结果**:\n\n{response_text}"
+                ))
+            else:
+                await self.send_message(UnifiedSendRequest(
+                    chat_id=chat_id,
+                    message_type="text",
+                    content="⚠️ 图片识别失败，可能是 API 限额或网络问题。"
+                ))
+
+        except ImportError:
+            logger.error("无法导入 gemini_ocr，请检查路径")
+            await self.send_message(UnifiedSendRequest(
+                chat_id=chat_id,
+                message_type="text",
+                content="⚠️ 系统配置错误：无法加载 OCR 模块。"
+            ))
+        except Exception as e:
+            logger.error(f"OCR 过程出错: {e}")
+            await self.send_message(UnifiedSendRequest(
+                chat_id=chat_id,
+                message_type="text",
+                content=f"⚠️ 处理出错: {str(e)}"
+            ))
+
+    async def _process_document_file(self, temp_path: str, file_name: str, chat_id: str):
+        """
+        处理文档文件
+        
+        Args:
+            temp_path: 临时文件路径
+            file_name: 文件名
+            chat_id: 聊天ID
+        """
+        file_size = os.path.getsize(temp_path)
+        file_size_str = f"{file_size / 1024:.1f} KB" if file_size < 1024 * 1024 else f"{file_size / 1024 / 1024:.2f} MB"
+        
+        await self.send_message(UnifiedSendRequest(
+            chat_id=chat_id,
+            message_type="text",
+            content=f"✅ 文件已接收：\n📄 文件名: {file_name}\n📦 大小: {file_size_str}\n\n暂不支持文档内容解析，请等待后续版本更新。"
+        ))
+
+    async def _process_audio_file(self, temp_path: str, chat_id: str):
+        """
+        处理音频文件
+        
+        Args:
+            temp_path: 临时文件路径
+            chat_id: 聊天ID
+        """
+        file_size = os.path.getsize(temp_path)
+        file_size_str = f"{file_size / 1024:.1f} KB" if file_size < 1024 * 1024 else f"{file_size / 1024 / 1024:.2f} MB"
+        
+        await self.send_message(UnifiedSendRequest(
+            chat_id=chat_id,
+            message_type="text",
+            content=f"✅ 音频已接收：\n📦 大小: {file_size_str}\n\n暂不支持音频转写，请等待后续版本更新。"
+        ))
+
+    async def _process_media_file(self, temp_path: str, chat_id: str):
+        """
+        处理视频文件
+        
+        Args:
+            temp_path: 临时文件路径
+            chat_id: 聊天ID
+        """
+        file_size = os.path.getsize(temp_path)
+        file_size_str = f"{file_size / 1024:.1f} KB" if file_size < 1024 * 1024 else f"{file_size / 1024 / 1024:.2f} MB"
+        
+        await self.send_message(UnifiedSendRequest(
+            chat_id=chat_id,
+            message_type="text",
+            content=f"✅ 视频已接收：\n📦 大小: {file_size_str}\n\n暂不支持视频处理，请等待后续版本更新。"
+        ))
