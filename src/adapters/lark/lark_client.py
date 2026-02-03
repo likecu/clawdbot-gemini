@@ -16,7 +16,9 @@ import lark_oapi as lark
 from lark_oapi.api.im.v1 import (
     GetMessageResourceRequest,
     CreateImageRequest,
-    CreateImageRequestBody
+    CreateImageRequestBody,
+    CreateFileRequest,
+    CreateFileRequestBody
 )
 
 from .message_converter import MessageConverter
@@ -432,4 +434,50 @@ class LarkWSClient:
 
         except Exception as e:
             self.logger.error(f"上传图片异常: {str(e)}")
+            return None
+
+    def upload_file(self, file_path: str, file_type: str = "stream", duration: int = None) -> Optional[str]:
+        """
+        上传文件 (PDF, Doc, Python脚本等)
+        
+        Args:
+            file_path: 文件路径
+            file_type: 文件类型 (stream, mp4, pdf, doc, xls, ppt, etc.)
+            duration: 视频/音频时长(毫秒)，仅媒体文件需要
+            
+        Returns:
+            str: file_key, 失败返回None
+        """
+        try:
+            import os
+            file_name = os.path.basename(file_path)
+            file_size = os.path.getsize(file_path)
+            
+            with open(file_path, "rb") as f:
+                file_content = f.read()
+
+            # 构造请求体
+            body_builder = CreateFileRequestBody.builder() \
+                .file_type(file_type) \
+                .file_name(file_name) \
+                .file(file_content)
+                
+            if duration:
+                body_builder.duration(duration)
+
+            request = CreateFileRequest.builder() \
+                .request_body(body_builder.build()) \
+                .build()
+
+            # 发送请求
+            response = self._api_client.im.v1.file.create(request)
+
+            if not response.success():
+                self.logger.error(f"上传文件失败: {response.code} - {response.msg}")
+                return None
+
+            return response.data.file_key
+
+        except Exception as e:
+            self.logger.error(f"上传文件异常: {str(e)}")
             return None
