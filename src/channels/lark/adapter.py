@@ -109,7 +109,7 @@ class LarkChannel(BaseChannel):
                    .build())
 
             # 使用 _client 直接发送，绕过 self.client.send_message 的限制
-            resp = self.client._client.im.v1.message.create(req)
+            resp = self.client._api_client.im.v1.message.create(req)
             
             if resp.code == 0:
                 return True
