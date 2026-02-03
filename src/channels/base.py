@@ -12,6 +12,7 @@ class UnifiedMessage(BaseModel):
     chat_id: str           # Unique identifier of the conversation/group
     message_type: str      # "private" or "group"
     content: str           # Text content of the message
+    images: List[str] = [] # List of image URLs (支持多模态消息)
     raw_data: Dict[str, Any] = {} # Original platform message for advanced use
     timestamp: float = 0.0
 

@@ -84,7 +84,11 @@ class QQChannel(BaseChannel):
             # Filter valid messages
             if not message.text:
                 return
-                
+            
+            # 解析CQ码
+            from utils.cq_parser import parse_cq_code
+            parsed = parse_cq_code(message.text)
+            
             # Convert to UnifiedMessage
             msg_type = message.message_type or "private"
             
@@ -92,12 +96,17 @@ class QQChannel(BaseChannel):
             chat_id = str(message.group_id) if msg_type == "group" else str(message.user_id)
             user_id = str(message.user_id)
             
+            # 构建消息内容，如果有图片URL，添加到content中
+            content = parsed['text']
+            images = parsed.get('images', [])
+            
             unified_msg = UnifiedMessage(
                 platform="qq",
                 user_id=user_id,
                 chat_id=chat_id,
                 message_type=msg_type,
-                content=message.text,
+                content=content,
+                images=images,  # 将图片URL列表传递
                 raw_data=message.dict(),
                 timestamp=float(message.time) if message.time else 0.0
             )

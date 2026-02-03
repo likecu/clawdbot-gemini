@@ -359,18 +359,29 @@ class ClawdbotApplication:
             # UnifiedMessage doesn't explicitly store self_id yet, but we can assume we generally want to process incoming.
             
             user_text = message.content or ""
+            
+            # 3. 处理图片URL
+            # 如果消息包含图片，将URL附加到消息文本中
+            if message.images and len(message.images) > 0:
+                # 为每张图片添加URL
+                image_text = "\n".join([f"[图片: {url}]" for url in message.images])
+                if user_text:
+                    user_text = f"{user_text}\n{image_text}"
+                else:
+                    user_text = image_text
+            
             if not user_text:
                 return
 
             logger.info(f"[{message.platform}] Received: {user_text} from {message.user_id} in {message.chat_id}")
 
-            # 3. Construct Session ID
+            # 4. Construct Session ID
             # IMPORTANT: Use underscores to avoid file system issues and parsing ambiguity
             # Format: "{platform}_{message_type}_{chat_id}"
             
             session_id = f"{message.platform}_{message.message_type}_{message.chat_id}"
             
-            # 4. Agent Processing
+            # 5. Agent Processing
             # Note: Agent expects user_id and chat_id. We can pass the composite session_id as chat_id or handle it.
             # The agent uses chat_id to query session history. So "qq:group:123" is unique and good.
             
