@@ -112,7 +112,7 @@ class LarkWSClient:
         # 使用 EventDispatcherHandler.builder() 创建事件分发器
         # 长连接模式下，两个参数应为空字符串
         event_handler = lark.EventDispatcherHandler.builder("", "") \
-            .register_p2p_chat_message_receive(on_p2p_message_receive) \
+            .register_p2_im_message_receive_v1(on_p2p_message_receive) \
             .build()
         
         self._client = ws.Client(
