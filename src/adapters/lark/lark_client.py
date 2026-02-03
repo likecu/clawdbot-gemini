@@ -52,10 +52,13 @@ class LarkWSClient:
         
         self.logger = logging.getLogger(__name__)
         self._client: Optional[ws.Client] = None
+        self._api_client: Optional[lark.Client] = None  # 用于API调用的客户端
         self._is_connected = False
         self._event_handlers: Dict[str, Callable] = {}
         self._message_converter = MessageConverter()
-        self.logger = logging.getLogger(__name__)
+        
+        # 立即初始化API客户端(用于发送消息和获取资源)
+        self._init_api_client()
         
     def _validate_config(self) -> None:
         """
@@ -81,6 +84,22 @@ class LarkWSClient:
             bool: 连接状态
         """
         return self._is_connected
+    
+    def _init_api_client(self) -> None:
+        """
+        初始化API客户端(用于发送消息和获取资源文件)
+        
+        与WebSocket客户端不同,API客户端用于调用REST API
+        """
+        try:
+            self._api_client = lark.Client.builder() \
+                .app_id(self.app_id) \
+                .app_secret(self.app_secret) \
+                .log_level(self.log_level) \
+                .build()
+            self.logger.info("飞书API客户端初始化成功")
+        except Exception as e:
+            self.logger.error(f"初始化API客户端失败: {e}")
         
     def register_event_handler(self, event_type: str, handler: Callable) -> None:
         """
@@ -270,7 +289,7 @@ class LarkWSClient:
                           .build())
                       .build())
             
-            response = self._client.im.v1.message.create(request)
+            response = self._api_client.im.v1.message.create(request)
             
             if response.code == 0:
                 return {"success": True, "message_id": response.data.message_id}
@@ -355,9 +374,9 @@ class LarkWSClient:
                 .type(resource_type) \
                 .build()
 
-            # 发送请求
+            # 发送请求 (使用API客户端而非WebSocket客户端)
             # 注意：im.v1.message_resource.get 返回的是流
-            response = self._client.im.v1.message_resource.get(request)
+            response = self._api_client.im.v1.message_resource.get(request)
 
             if not response.success():
                 self.logger.error(f"获取资源失败: {response.code} - {response.msg}")
@@ -403,7 +422,7 @@ class LarkWSClient:
                 .build()
 
             # 发送请求
-            response = self._client.im.v1.image.create(request)
+            response = self._api_client.im.v1.image.create(request)
 
             if not response.success():
                 self.logger.error(f"上传图片失败: {response.code} - {response.msg}")
