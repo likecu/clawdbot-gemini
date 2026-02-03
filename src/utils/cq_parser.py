@@ -48,6 +48,8 @@ def parse_cq_code(text: str) -> Dict[str, Any]:
             for pair in param_pairs:
                 if '=' in pair:
                     key, value = pair.split('=', 1)
+                    # 反转义 OneBot CQ 码特殊字符
+                    value = value.replace('&amp;', '&').replace('&comma;', ',').replace('&#91;', '[').replace('&#93;', ']')
                     params[key] = value
         
         raw_cq_codes.append({
