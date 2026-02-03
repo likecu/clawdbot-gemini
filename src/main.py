@@ -371,10 +371,10 @@ class ClawdbotApplication:
                     import aiohttp
                     
                     settings = get_settings()
-                    ocr = GeminiOCR(api_key=settings.gemini_api_key)
-                    
+                    logger.info(f"[OCR] 准备处理 {len(message.images)} 张图片: {message.images}")
                     for idx, img_source in enumerate(message.images):
                         try:
+                            logger.info(f"[OCR] 处理第 {idx+1} 张图片, 来源: {img_source}")
                             temp_path = f"/tmp/unified_img_{message.platform}_{idx}_{message.timestamp}.jpg"
                             
                             # 处理不同来源的图片

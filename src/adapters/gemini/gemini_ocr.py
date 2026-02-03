@@ -260,19 +260,22 @@ class GeminiOCR:
                     image_bytes = f.read()
                 
                 # 构建消息内容
+                print(f"[DEBUG] 构建请求: 模型={self.model_name}, 图片路径={image_path}")
                 contents = [
                     types.Part.from_bytes(
                         data=image_bytes,
-                        mime_type='image/jpeg' if image_path.endswith('.jpg') or image_path.endswith('.jpeg') else 'image/png'
+                        mime_type='image/jpeg' if image_path.lower().endswith(('.jpg', '.jpeg')) else 'image/png'
                     ),
                     question
                 ]
                 
                 # 调用Gemini API
+                print(f"[DEBUG] 正在调用 Gemini API...")
                 response = self.client.models.generate_content(
                     model=self.model_name,
                     contents=contents
                 )
+                print(f"[DEBUG] API 调用成功")
                 
                 # 估算使用的令牌数（简单估算）
                 tokens_used = len(response.text) * 1.5  # 粗略估算：每个汉字约1.5个令牌
@@ -323,11 +326,13 @@ class GeminiOCR:
                         print("没有可用的替代模型")
                         break
                 elif "modality" in error_msg.lower() or "multimodal" in error_msg.lower():
+                    print(f"[DEBUG] 捕获到模态错误: {error_msg}")
                     print(f"模型 {self.model_name} 不支持图片输入，尝试切换到 Gemini 1.5 Flash...")
                     current_attempt += 1
                     self.model_name = "gemini-1.5-flash"
                 else:
                     # 其他错误，直接返回
+                    print(f"[DEBUG] 捕获到非模态错误: {error_msg}")
                     return None
         
         print(f"尝试了 {current_attempt} 次后仍无法完成识别")
