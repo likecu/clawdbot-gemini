@@ -311,6 +311,10 @@ class GeminiOCR:
                     else:
                         print("没有可用的替代模型")
                         break
+                elif "modality" in error_msg.lower() or "multimodal" in error_msg.lower():
+                    print(f"模型 {self.model_name} 不支持图片输入，尝试切换到 Gemini 1.5 Flash...")
+                    current_attempt += 1
+                    self.model_name = "gemini-1.5-flash"
                 else:
                     # 其他错误，直接返回
                     return None
@@ -753,8 +757,13 @@ class GeminiOCR:
             if self.is_model_available(model_name):
                 return model_name
         
-        # 如果没有可用模型，默认使用gemma-3-27b-it
-        return "gemma-3-27b-it"
+        # 如果没有可用模型，根据任务类型返回不同的默认模型
+        if task_type == "image_supported":
+            return "gemini-1.5-flash"
+        elif task_type == "document_supported":
+            return "gemini-1.5-flash"
+        else:
+            return "gemini-2.5-flash-lite"
     
     def check_quota(self, show_details=False):
         """
