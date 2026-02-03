@@ -155,25 +155,50 @@ class LarkChannel(BaseChannel):
                 if msg_type == "text":
                     text = content_json.get("text", "")
                 elif msg_type == "image" or image_key:
-                    # 处理图片消息
+                    # 处理图片消息 - 与QQ保持一致的处理方式
                     if not image_key:
                         logger.warning("Message type is image but no image_key found")
                         return
 
                     message_id = message.get("message_id")
-                    logger.info(f"Detected Image Message! key={image_key}, starting process task.")
+                    logger.info(f"Detected Image Message! key={image_key}, downloading...")
                     
                     target_id = chat_id or sender_id
                     if not target_id:
                         logger.error("Cannot process image: both chat_id and sender_id are None")
                         return
                     
-                    asyncio.create_task(self._process_file_message(
-                        message_id=message_id,
-                        file_key=image_key,
-                        chat_id=target_id,
-                        file_type="image"
-                    ))
+                    # 下载图片
+                    image_data = self.client.get_message_resource(message_id, image_key, "image")
+                    if image_data:
+                        # 保存到临时文件
+                        temp_path = f"/tmp/lark_img_{message_id}.jpg"
+                        with open(temp_path, "wb") as f:
+                            f.write(image_data)
+                        logger.info(f"图片已保存到: {temp_path}, 大小: {len(image_data)} bytes")
+                        
+                        # 构建UnifiedMessage,将图片路径放入images列表
+                        chat_type = message.get("chat_type", "p2p")
+                        unified_type = "group" if chat_type == "group" else "private"
+                        
+                        unified_msg = UnifiedMessage(
+                            platform="lark",
+                            user_id=sender_id or "unknown",
+                            chat_id=target_id,
+                            message_type=unified_type,
+                            content="",  # 图片消息文本为空
+                            images=[temp_path],  # 将图片路径放入列表
+                            raw_data=event_data,
+                            timestamp=float(message.get("create_time", 0)) / 1000.0
+                        )
+                        
+                        # 使用与文本消息相同的处理方式
+                        asyncio.run_coroutine_threadsafe(
+                            self.on_message_received(unified_msg),
+                            asyncio.get_event_loop()
+                        )
+                    else:
+                        logger.error(f"图片下载失败: {image_key}")
                     return
                 elif msg_type == "file":
                     # 处理文件消息(文档、PDF等)
