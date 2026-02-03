@@ -12,6 +12,12 @@ from datetime import datetime
 
 import lark_oapi as lark
 from lark_oapi import ws
+import lark_oapi as lark
+from lark_oapi.api.im.v1 import (
+    GetMessageResourceRequest,
+    CreateImageRequest,
+    CreateImageRequestBody
+)
 
 from .message_converter import MessageConverter
 
@@ -98,59 +104,84 @@ class LarkWSClient:
         
         self.logger.info("正在创建飞书WebSocket客户端...")
         
-        def default_handler(event):
-            try:
-                self.logger.info(f"收到飞书事件: type={type(event)}")
-                
-                # 尝试提取事件类型
-                event_type = "unknown"
-                event_dict = {}
-                
-                # 如果是 dict
-                if isinstance(event, dict):
-                    event_dict = event
-                    event_type = event.get("header", {}).get("event_type", "unknown")
-                    # Fallback for some events
-                    if event_type == "unknown":
-                        event_type = event.get("type", "unknown")
-                
-                # 如果是对象，尝试转为 dict
-                else:
-                    # 尝试获取 header.event_type
-                    header = getattr(event, "header", None)
-                    if header:
-                        event_type = getattr(header, "event_type", "unknown")
-                    
-                    # 尝试转为 dict
-                    if hasattr(event, "__dict__"):
-                        event_dict = event.__dict__
-                    elif hasattr(event, "data"): # 某些 SDK 封装
-                         event_dict = event.data
-                    
-                    # 如果转失败，记录
-                    if not event_dict:
-                        self.logger.warning(f"无法将事件对象转为字典: {dir(event)}")
-                        return
-
-                self.logger.info(f"处理事件类型: {event_type}")
-                
-                handler = self._event_handlers.get(event_type)
-                if handler:
-                    handler(event_dict)
-                else:
-                     self.logger.debug(f"未找到处理器: {event_type}")
-            except Exception as e:
-                self.logger.error(f"事件处理异常: {e}")
+        # 创建一个通用的事件回调处理函数
+        def on_p2p_message_receive(data):
+            """处理私聊消息事件"""
+            self._dispatch_event("im.message.receive_v1", data)
+        
+        # 使用 EventDispatcherHandler.builder() 创建事件分发器
+        # 长连接模式下，两个参数应为空字符串
+        event_handler = lark.EventDispatcherHandler.builder("", "") \
+            .register_p2p_chat_message_receive(on_p2p_message_receive) \
+            .build()
         
         self._client = ws.Client(
             app_id=self.app_id,
             app_secret=self.app_secret,
-            event_handler=default_handler,
+            event_handler=event_handler,
             log_level=self.log_level
         )
         
         self.logger.info("飞书WebSocket客户端创建成功")
         return self._client
+    
+    def _dispatch_event(self, event_type: str, data):
+        """
+        分发事件到注册的处理器
+        
+        Args:
+            event_type: 事件类型
+            data: 事件数据(可能是对象或字典)
+        """
+        try:
+            self.logger.info(f"收到飞书事件: type={type(data)}, event_type={event_type}")
+            
+            event_dict = {}
+            
+            # 尝试将数据转换为字典格式
+            if isinstance(data, dict):
+                event_dict = data
+            elif hasattr(data, "__dict__"):
+                # 如果是 Pydantic model 或普通对象
+                if hasattr(data, "dict"):
+                    event_dict = data.dict()
+                elif hasattr(data, "model_dump"):
+                    event_dict = data.model_dump()
+                else:
+                    # 尝试递归转换
+                    event_dict = self._object_to_dict(data)
+            else:
+                self.logger.warning(f"无法将事件对象转为字典: {type(data)}")
+                return
+            
+            self.logger.info(f"处理事件类型: {event_type}")
+            
+            handler = self._event_handlers.get(event_type)
+            if handler:
+                handler(event_dict)
+            else:
+                self.logger.debug(f"未找到处理器: {event_type}")
+        except Exception as e:
+            self.logger.error(f"事件处理异常: {e}", exc_info=True)
+    
+    def _object_to_dict(self, obj) -> dict:
+        """
+        递归将对象转换为字典
+        
+        Args:
+            obj: 要转换的对象
+            
+        Returns:
+            dict: 转换后的字典
+        """
+        if isinstance(obj, dict):
+            return {k: self._object_to_dict(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._object_to_dict(item) for item in obj]
+        elif hasattr(obj, "__dict__"):
+            return {k: self._object_to_dict(v) for k, v in obj.__dict__.items() if not k.startswith("_")}
+        else:
+            return obj
         
     def start(self, blocking: bool = False) -> None:
         """
@@ -303,4 +334,83 @@ class LarkWSClient:
                 
         except Exception as e:
             self.logger.error(f"获取token异常: {str(e)}")
+            return None
+    def get_message_resource(self, message_id: str, file_key: str, resource_type: str = "image") -> Optional[bytes]:
+        """
+        获取消息资源（图片/文件）
+        
+        Args:
+            message_id: 消息ID
+            file_key: 文件Key
+            resource_type: 资源类型 (image/file)
+            
+        Returns:
+            bytes: 文件二进制内容，失败返回None
+        """
+        try:
+            # 构造请求
+            request = GetMessageResourceRequest.builder() \
+                .message_id(message_id) \
+                .file_key(file_key) \
+                .type(resource_type) \
+                .build()
+
+            # 发送请求
+            # 注意：im.v1.message_resource.get 返回的是流
+            response = self._client.im.v1.message_resource.get(request)
+
+            if not response.success():
+                self.logger.error(f"获取资源失败: {response.code} - {response.msg}")
+                return None
+            
+            # 读取流内容
+            # lark-oapi Python SDK 的 response.data 应该是一个流或者是 bytes
+            # 查看源码或文档通常是 file_name 和 file 属性
+            # 如果是 raw response
+            if hasattr(response, "file") and response.file:
+                 return response.file.read()
+            elif hasattr(response, "data") and response.data:
+                 # 如果是流对象
+                 if hasattr(response.data, "read"):
+                     return response.data.read()
+                 return response.data
+            else:
+                 self.logger.error("响应中没有包含文件内容")
+                 return None
+
+        except Exception as e:
+            self.logger.error(f"下载资源异常: {str(e)}")
+            return None
+
+    def upload_image(self, image_data: bytes, image_type: str = "message") -> Optional[str]:
+        """
+        上传图片
+        
+        Args:
+            image_data: 图片二进制数据
+            image_type: 图片类型 (message/avatar)
+            
+        Returns:
+            str: image_key，失败返回None
+        """
+        try:
+            # 构造请求
+            request = CreateImageRequest.builder() \
+                .request_body(CreateImageRequestBody.builder()
+                    .image_type(image_type)
+                    .image(image_data)
+                    .build()) \
+                .build()
+
+            # 发送请求
+            response = self._client.im.v1.image.create(request)
+
+            if not response.success():
+                self.logger.error(f"上传图片失败: {response.code} - {response.msg}")
+                return None
+
+            return response.data.image_key
+
+        except Exception as e:
+            self.logger.error(f"上传图片异常: {str(e)}")
             return None

@@ -135,6 +135,10 @@ class LarkChannel(BaseChannel):
             message = event.get("message", {})
             sender = event.get("sender", {})
             
+            # 提前定义 chat_id 和 sender_id，确保在处理图片时可用
+            chat_id = message.get("chat_id")
+            sender_id = sender.get("sender_id", {}).get("open_id") if isinstance(sender.get("sender_id"), dict) else None
+            
             msg_type = message.get("message_type", "text")
             msg_content = message.get("content", "{}")
             text = ""
@@ -157,15 +161,18 @@ class LarkChannel(BaseChannel):
                     message_id = message.get("message_id")
                     logger.info(f"Detected Image Message! key={image_key}, starting process task.")
                     
+                    # 使用已定义的 chat_id 和 sender_id 进行图片处理
+                    target_id = chat_id or sender_id
+                    if not target_id:
+                        logger.error("Cannot process image: both chat_id and sender_id are None")
+                        return
+                    
                     # 异步处理图片下载和识别
-                    asyncio.create_task(self._process_image_message(message_id, image_key, chat_id or sender_id))
+                    asyncio.create_task(self._process_image_message(message_id, image_key, target_id))
                     return # Handled
             except Exception as e:
                 logger.error(f"Error parsing message content: {e}")
                 text = str(msg_content)
-
-            chat_id = message.get("chat_id")
-            sender_id = sender.get("sender_id", {}).get("open_id") # or union_id
             
             # Determine message type (private vs group)
             # chat_type: "p2p" or "group"
