@@ -131,6 +131,17 @@ class GeminiOCR:
                 "gemini-experimental"
             ]
         })
+
+        # 响应用户请求：强制将 gemma-3-27b-it 加入到 image_supported 列表的首位进行尝试
+        # 即使模型检测认为它不支持，这里也强制尝试，依赖 recognize_image 中的错误回退机制兜底
+        target_model = "gemma-3-27b-it" 
+        if "image_supported" not in self.model_priority:
+            self.model_priority["image_supported"] = []
+        
+        # 如果已存在，先移除，再添加到头部
+        if target_model in self.model_priority["image_supported"]:
+            self.model_priority["image_supported"].remove(target_model)
+        self.model_priority["image_supported"].insert(0, target_model)
         
         # 选择合适的模型（默认文本模型）
         self.model_name = self.select_best_model(task_type="text_only")
