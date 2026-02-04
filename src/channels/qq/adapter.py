@@ -84,6 +84,23 @@ class QQChannel(BaseChannel):
             # Filter valid messages
             if not message.text:
                 return
+
+            # Send acknowledgement immediately
+            try:
+                ack_msg = "收到你的问题啦，我正在思考哦"
+                msg_type = message.message_type or "private"
+                # Determine target ID
+                target_id = message.group_id if msg_type == "group" else message.user_id
+                
+                ack_req = MessageRequest(
+                    message_type=msg_type,
+                    user_id=target_id if msg_type == "private" else None,
+                    group_id=target_id if msg_type == "group" else None,
+                    message=ack_msg
+                )
+                self.client.send_message(ack_req)
+            except Exception as e:
+                logger.error(f"Failed to send acknowledgement: {e}")
             
             # 解析CQ码
             from utils.cq_parser import parse_cq_code
