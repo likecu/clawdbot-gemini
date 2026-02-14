@@ -23,12 +23,17 @@ app.use(bodyParser.json());
 // Path to clawdbot sessions
 const SESSIONS_DIR = path.join(os.homedir(), '.clawdbot/agents/main/sessions');
 
-// Health check
+// 健康检查接口，用于验证服务是否正常运行
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', service: 'clawdbot-http-wrapper' });
 });
 
-// POST /chat - Send message to clawdbot and get response
+/**
+ * 处理聊天请求的 POST 接口
+ * 接收用户消息并启动 clawdbot CLI 进行处理
+ * @param {Object} req.body.message - 用户输入的消息内容
+ * @param {Object} req.body.session_id - 会话唯一标识符
+ */
 app.post('/chat', async (req, res) => {
     const { message, session_id } = req.body;
 
@@ -81,20 +86,14 @@ app.post('/chat', async (req, res) => {
         let finalReply = "任务已完成。";
 
         try {
-            // Debug buffer
-            console.log(`[DEBUG] Final stdout buffer length: ${stdoutBuffer.length}`);
-            if (stdoutBuffer.length > 500) {
-                console.log(`[DEBUG] Final stdout buffer (end): ${stdoutBuffer.slice(-500)}`);
-            } else {
-                console.log(`[DEBUG] Final stdout buffer: ${stdoutBuffer}`);
-            }
+            // Iterate through all potential JSON objects in the buffer
+            let currentIdx = 0;
+            while (true) {
+                let jsonStart = stdoutBuffer.indexOf('{', currentIdx);
+                if (jsonStart === -1) break;
 
-            // Brace counting to find first valid JSON object
-            let jsonStart = stdoutBuffer.indexOf('{');
-            let jsonEnd = -1;
-
-            if (jsonStart !== -1) {
                 let braceCount = 0;
+                let jsonEnd = -1;
                 for (let i = jsonStart; i < stdoutBuffer.length; i++) {
                     if (stdoutBuffer[i] === '{') {
                         braceCount++;
@@ -106,48 +105,50 @@ app.post('/chat', async (req, res) => {
                         }
                     }
                 }
-            }
 
-            console.log(`[DEBUG] JSON start index: ${jsonStart}, calculated end index: ${jsonEnd}`);
+                if (jsonEnd !== -1) {
+                    const jsonStr = stdoutBuffer.substring(jsonStart, jsonEnd + 1);
+                    try {
+                        const result = JSON.parse(jsonStr);
+                        console.log(`[DEBUG] Parsed JSON from buffer at ${jsonStart}`);
 
-            if (jsonStart !== -1 && jsonEnd !== -1) {
-                const jsonStr = stdoutBuffer.substring(jsonStart, jsonEnd + 1);
-                const result = JSON.parse(jsonStr);
+                        const payloads = result.payloads || (result.result && result.result.payloads);
 
-                if (result) {
-                    console.log(`[DEBUG] Parsed JSON keys: ${Object.keys(result)}`);
-                    if (result.result) {
-                        console.log(`[DEBUG] result.result keys: ${Object.keys(result.result)}`);
+                        if (payloads) {
+                            payloads.forEach(p => {
+                                if (p.text) {
+                                    sendCallback(sessionId, p.text);
+                                    sentCount++;
+                                    finalReply = p.text;
+                                }
+                            });
+                        }
+                    } catch (parseErr) {
+                        console.error(`[DEBUG] Failed to parse JSON object at ${jsonStart}: ${parseErr.message}`);
                     }
-
-                    // Support payloads at root OR nested in result
-                    const payloads = result.payloads || (result.result && result.result.payloads);
-
-                    if (payloads) {
-                        payloads.forEach(p => {
-                            if (p.text) {
-                                sendCallback(sessionId, p.text);
-                                sentCount++;
-                                finalReply = p.text; // Keep last as final reply
-                            }
-                        });
-                    }
+                    currentIdx = jsonEnd + 1;
                 } else {
-                    console.error("No JSON found in stdout");
+                    break;
                 }
             }
         } catch (e) {
-            console.error(`Error parsing JSON output: ${e.message}`);
+            console.error(`Error processing stdout buffer: ${e.message}`);
         }
 
         res.json({
             reply: finalReply,
             segments_sent: sentCount,
+            is_callback_mode: sentCount > 0,
+            stdout_preview: stdoutBuffer.substring(0, 100)
         });
     });
 });
 
-// Helper to send data back to the Python app
+/**
+ * 回调辅助函数，将 Clawdbot 的中间结果或最终结果发回 Python 主应用
+ * @param {string} sessionId - 会话 ID
+ * @param {string} content - 需要回复给用户的内容
+ */
 function sendCallback(sessionId, content) {
     console.log(`[CALLBACK] Sending segment for ${sessionId}: ${content.substring(0, 30)}...`);
     const data = JSON.stringify({
@@ -187,8 +188,9 @@ function sendCallback(sessionId, content) {
     request.end();
 }
 
+// 启动 Express 服务器，监听指定端口
 app.listen(port, () => {
-    console.log(`🤖 Clawdbot HTTP Wrapper listening on port ${port}`);
+    console.log(`🤖 Clawdbot HTTP Wrapper 正在监听端口 ${port}`);
     console.log(`Health endpoint: http://localhost:${port}/health`);
     console.log(`Chat endpoint: http://localhost:${port}/chat (POST)`);
     console.log(`Sessions directory: ${SESSIONS_DIR}`);

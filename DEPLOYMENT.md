@@ -303,6 +303,16 @@ scp -i ~/.ssh/milk .env milk@34.72.125.220:/home/milk/clawdbot-gemini/.env
 
 # 远程服务器传输 OpenCode 环境变量
 scp -i ~/.ssh/milk .env.opencode milk@34.72.125.220:/home/milk/clawdbot-gemini/.env.opencode
+
+### 3.1 Host 组件部署 (Clawdbot CLI & Wrapper)
+本项目包含运行在 Host 主机上的非 Docker 组件（Clawdbot CLI 和 HTTP Wrapper），由 PM2 管理。
+`deploy.sh` 脚本已包含自动更新这些组件的逻辑：
+
+1.  **自动同步配置**：将本地 `../clawdbot.json` 同步到远程 `~/.clawdbot/clawdbot.json`。
+2.  **自动更新 Wrapper**：将本地 `../clawdbot_http_wrapper.js` 同步到远程 `~/clawd/clawdbot_http_wrapper.js`。
+3.  **自动重启服务**：通过 PM2 重启 `clawdbot-wrapper` 服务。
+
+**注意**：如果不希望更新 Host 组件，运行时可添加 `--docker-only` 参数。
 ```
 
 ### 4. Docker 部署命令

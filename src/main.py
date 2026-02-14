@@ -115,72 +115,36 @@ class ClawdbotApplication:
                 
                 logger.info(f"收到 Clawdbot 实时推送 [Session: {session_id}]: {content[:50]}...")
                 
-                # Session ID parsing strategy needs to align with how we generate it in _handle_unified_message
-                # Format: "{platform}:{chat_id}"
+                # Session ID 解析策略
+                # 优先解析新格式: "platform:type:chat_id"
+                # 备选解析旧格式: "platform_type_chat_id"
                 
-                parts = session_id.split(":", 1)
-                if len(parts) != 2:
-                    # Legacy fallback or error
-                    # If legacy format: qq_123456_private
-                    if session_id.startswith("qq"):
-                         platform = "qq"
-                         # Legacy parsing logic
-                         legacy_parts = session_id.split("_")
-                         if "group" in legacy_parts:
-                            idx = legacy_parts.index("group")
-                            chat_id = legacy_parts[idx + 1] if len(legacy_parts) > idx + 1 else None
-                            # We treat group_id as chat_id for QQ group
-                         else:
-                            chat_id = legacy_parts[1] if len(legacy_parts) > 1 else None
+                if ":" in session_id:
+                    parts = session_id.split(":")
+                    if len(parts) >= 3:
+                        platform = parts[0]
+                        msg_type = parts[1]
+                        chat_id = ":".join(parts[2:])
+                    elif len(parts) == 2:
+                        platform = parts[0]
+                        chat_id = parts[1]
+                        msg_type = "private"
                     else:
-                        # Fallback for lark if needed, or error
-                        return {"status": "ignored", "reason": "invalid session_id format"}
+                        return {"status": "error", "message": "Invalid colon session format"}
+                elif "_" in session_id:
+                    parts = session_id.split("_")
+                    if len(parts) >= 3:
+                        platform = parts[0]
+                        msg_type = parts[1]
+                        chat_id = "_".join(parts[2:])
+                    elif len(parts) == 2:
+                        platform = parts[0]
+                        chat_id = parts[1]
+                        msg_type = "private"
+                    else:
+                        return {"status": "error", "message": "Invalid underscore session format"}
                 else:
-                    platform = parts[0]
-                    chat_id = parts[1]
-
-                if not chat_id:
-                    return {"status": "error", "message": "Could not extract chat_id"}
-
-                req = UnifiedSendRequest(
-                    chat_id=chat_id,
-                    content=content,
-                    message_type="text" # default
-                )
-                
-                # If QQ, we need to handle private/group distinction if the chat_id doesn't encode it.
-                # In our new adapter, we just pass chat_id. Adapter logic determines user_id vs group_id.
-                # BUT, our QQ adapter expects chat_id to be int string.
-                # And for MessageRequest inside adapter: if message_type...
-                # Wait, UnifiedSendRequest has message_type. We need to know it.
-                # The callback doesn't provide message_type explicitly. 
-                # Ideally, session_id should encode it or we assume 'text' and let adapter handle routing?
-                # No, 'private' or 'group' is needed for QQ.
-                # Our session_id format: platform:chat_id.
-                # QQ adapter implementation: 
-                #   target_id = int(request.chat_id)
-                #   qq_req = MessageRequest(..., message_type=request.message_type, ...)
-                # So we MUST provide correct message_type in UnifiedSendRequest.
-                
-                # Heuristic: 
-                # If platform is QQ, check if we can deduce type.
-                # Actually, in _handle_unified_message, we set session_id. 
-                # If we include type in session_id: "qq:group:123" or "qq:private:456".
-                # Let's adjust _handle_unified_message to use "platform:type:id" or similar to be robust.
-                # Parsing extended format: platform_type_id
-                parts = session_id.split("_")
-                if len(parts) >= 3:
-                     platform = parts[0]
-                     msg_type = parts[1]
-                     # Join the rest in case chat_id has underscores
-                     chat_id = "_".join(parts[2:])
-                elif len(parts) == 2:
-                     # Legacy or simple format fallback
-                     platform = parts[0]
-                     chat_id = parts[1]
-                     msg_type = "private" # default fallback
-                else:
-                     return {"status": "error", "message": "Invalid session format"}
+                    return {"status": "error", "message": "Unknown session format"}
                 
                 req.message_type = msg_type
                 req.chat_id = chat_id
@@ -437,7 +401,9 @@ class ClawdbotApplication:
             logger.info(f"[{message.platform}] Received: {user_text[:100]}... from {message.user_id} in {message.chat_id}")
 
             # 5. Construct Session ID
-            session_id = f"{message.platform}_{message.message_type}_{message.chat_id}"
+            # 格式: platform:type:id (例如 qq:private:123456)
+            # 这将被传递给 Agent 并最终传递给 Clawdbot CLI
+            session_id = f"{message.platform}:{message.message_type}:{message.chat_id}"
             
             # 6. Agent Processing
             result = await self.agent.process_message(
@@ -465,7 +431,11 @@ class ClawdbotApplication:
             logger.error(f"Error processing unified message: {e}")
 
     async def _broadcast_ui_message_from_unified(self, message: UnifiedMessage, direction: str):
-        """Broadcast received unified message to UI"""
+        """
+        将统一的消息格式广播到前端 UI 监控界面
+        :param message: 统一消息对象
+        :param direction: 消息方向 (received/sent)
+        """
         try:
              data = {
                 "platform": message.platform,
@@ -479,6 +449,9 @@ class ClawdbotApplication:
              logger.error(f"UI Broadcast error: {e}")
 
     async def _broadcast_sent_message(self, platform: str, chat_id: str, content: str, msg_type: str):
+         """
+         广播已发送的消息到 UI 面板
+         """
          try:
              data = {
                 "platform": platform,
@@ -492,7 +465,9 @@ class ClawdbotApplication:
              logger.error(f"UI Broadcast error: {e}")
 
     async def _monitor_napcat_logs(self):
-        """Monitor NapCat logs for QR code"""
+        """
+        持续监控 NapCat 容器日志，用于提取登录二维码
+        """
         logger.info("Starting NapCat log monitor...")
         try:
             import docker
@@ -554,18 +529,23 @@ class ClawdbotApplication:
         logger.info("Clawdbot已停止")
 
 class ConnectionManager:
-    """Manages WebSocket connections for the UI"""
+    """
+    管理前端 UI 的 WebSocket 连接
+    """
     def __init__(self):
         self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
+        """接受并保存新的 WebSocket 连接"""
         await websocket.accept()
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
+        """断开并移除 WebSocket 连接"""
         self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
+        """向所有活跃的 WebSocket 连接广播 JSON 消息"""
         import json
         for connection in self.active_connections:
             try:

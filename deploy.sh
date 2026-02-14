@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Clawdbot 自动化部署脚本
+# 功能：代码同步、配置更新、Docker 容器重启
+
 # 配置
 REMOTE_USER="milk"
 REMOTE_HOST="34.72.125.220"
@@ -41,17 +44,101 @@ ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} 'bash -s' << 'EOF'
         docker rm clawd-ai-tavern-1 || true
     fi
 
-    echo -e "${GREEN}>>> 3. 启动 NapCat (QQ 适配器)...${NC}"
-    # 确保 napcat 正在运行，并且网络已创建
-    docker compose -f napcat_compose.yml up -d
+    echo -e "${GREEN}>>> 3.1 确保 NapCat 容器存在...${NC}"
+    # 先启动一次以确保容器存在
+    docker-compose -f napcat_compose.yml up -d
+
+    echo -e "${GREEN}>>> 3.2 更新 NapCat 配置 (docker exec)...${NC}"
+    # 写入配置到临时文件，然后移动到容器内
+    cat > /tmp/napcat_onebot11.json << 'JSON'
+{
+  "http": {
+    "enable": false,
+    "host": "0.0.0.0",
+    "port": 3000,
+    "access_token": "",
+    "secret": "",
+    "enableHeart": false,
+    "enablePost": false,
+    "postUrls": []
+  },
+  "ws": {
+    "enable": false,
+    "host": "0.0.0.0",
+    "port": 8080,
+    "access_token": ""
+  },
+  "network": {
+    "httpServers": [
+        {
+            "name": "http",
+            "enable": true,
+            "host": "0.0.0.0",
+            "port": 3000,
+            "accessToken": "",
+            "enableMsg": true,
+            "enableEvent": true
+        }
+    ],
+    "httpSseServers": [],
+    "httpClients": [],
+    "websocketServers": [
+        {
+            "name": "ws",
+            "enable": true,
+            "host": "0.0.0.0",
+            "port": 8080,
+            "accessToken": "",
+            "enableMsg": true,
+            "enableEvent": true
+        }
+    ],
+    "websocketClients": [],
+    "plugins": []
+  },
+  "musicSignUrl": "",
+  "enableLocalFile2Url": false,
+  "parseMultMsg": false
+}
+JSON
+    # 使用 docker exec 写入配置 (root 权限)
+    docker cp /tmp/napcat_onebot11.json napcatqq:/app/napcat/config/onebot11_2745708378.json
+    docker cp /tmp/napcat_onebot11.json napcatqq:/app/napcat/config/onebot11.json
+    rm /tmp/napcat_onebot11.json
+    
+    # 重启 napcat 以应用配置
+    docker restart napcatqq || true
 
     echo -e "${GREEN}>>> 4. 启动 ClawdBots 服务...${NC}"
     # 重新构建并启动主服务
-    docker compose up -d --build --remove-orphans
+    docker-compose up -d --build
 
     echo -e "${GREEN}>>> 5. 清理没用的镜像...${NC}"
     docker image prune -f
 EOF
+
+# 2.1 更新 Host 上的 Clawdbot 配置和 Wrapper (如果不使用 --docker-only)
+if [[ "$*" != *"--docker-only"* ]]; then
+    echo -e "${GREEN}>>> 正在更新 Host 端 Clawdbot 配置...${NC}"
+    
+    # 确保本地文件存在
+    if [ -f "../clawdbot.json" ]; then
+        echo "Uploading clawdbot.json..."
+        scp -i ${SSH_KEY} ../clawdbot.json ${REMOTE_USER}@${REMOTE_HOST}:/home/${REMOTE_USER}/.clawdbot/clawdbot.json
+    else
+        echo -e "${RED}Warning: ../clawdbot.json not found locally. Skipping config upload.${NC}"
+    fi
+
+    if [ -f "../clawdbot_http_wrapper.js" ]; then
+        echo "Uploading clawdbot_http_wrapper.js..."
+        scp -i ${SSH_KEY} ../clawdbot_http_wrapper.js ${REMOTE_USER}@${REMOTE_HOST}:/home/${REMOTE_USER}/clawd/clawdbot_http_wrapper.js
+        
+        echo "Restarting clawdbot-wrapper service..."
+        ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} "/home/milk/.npm-global/bin/pm2 restart clawdbot-wrapper"
+    else
+        echo -e "${RED}Warning: ../clawdbot_http_wrapper.js not found locally. Skipping wrapper upload.${NC}"
+    fi
+fi
 
 # 3. 验证
 echo -e "${GREEN}>>> 部署完成，正在检查服务状态...${NC}"
