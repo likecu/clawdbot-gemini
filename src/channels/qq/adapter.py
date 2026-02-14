@@ -61,13 +61,22 @@ class QQChannel(BaseChannel):
             # "private": user_id=123
             # "group": group_id=456
             
-            target_id = int(request.chat_id)
+            # Try to parse chat_id which might be prefixed (e.g. qq_private_123456)
+            raw_id = str(request.chat_id)
+            if "_" in raw_id:
+                # Extract the last part which should be the ID
+                raw_id = raw_id.split("_")[-1]
+            
+            target_id = int(raw_id)
+            
+            # Filter asterisks as requested by user
+            cleaned_content = request.content.replace("*", "")
             
             qq_req = MessageRequest(
                 message_type=request.message_type,
                 user_id=target_id if request.message_type == "private" else None,
                 group_id=target_id if request.message_type == "group" else None,
-                message=request.content
+                message=cleaned_content
             )
             
             resp = self.client.send_message(qq_req)
@@ -89,37 +98,46 @@ class QQChannel(BaseChannel):
 
     async def _handle_qq_message(self, message: QQMessage):
         """
-        处理来自 NapCat 的原始 QQ 消息回调
-        :param message: QQ 消息对象，包含发送者、内容、类型等
+        处理来自 NapCat 的原始 QQ 消息回调，将其转换为统一消息格式并分发
+        
+        Args:
+            message: QQMessage 实例，包含发送者、内容、类型等详细数据
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: 处理或转换消息过程中的异常
         """
         try:
             # Filter valid messages
             if not message.text:
                 return
 
-            # 发送响应确认（仅针对较长或复杂的问题）
-            try:
-                # 如果消息很简单（如：你好，在吗），直接透传给 LLM 即可，不需要“思考中”提示
-                message_complexity = len(message.text) + (len(images) * 20)
-                if message_complexity > 30:
-                    ack_msg = "收到你的问题啦，我正在思考哦..."
-                    msg_type = message.message_type or "private"
-                    target_id = message.group_id if msg_type == "group" else message.user_id
-                    
-                    ack_req = MessageRequest(
-                        message_type=msg_type,
-                        user_id=target_id if msg_type == "private" else None,
-                        group_id=target_id if msg_type == "group" else None,
-                        message=ack_msg
-                    )
-                    self.client.send_message(ack_req)
-                    logger.debug(f"Sent thinking acknowledgement for message length {len(message.text)}")
-            except Exception as e:
-                logger.error(f"Failed to send acknowledgement: {e}")
-            
             # 解析CQ码
             from utils.cq_parser import parse_cq_code
             parsed = parse_cq_code(message.text)
+            images = parsed.get('images', [])
+
+            # 发送响应确认
+            try:
+                # 统一发送提示消息
+                ack_msg = "收到你的问题啦，我正在思考哦"
+                msg_type = message.message_type or "private"
+                target_id = message.group_id if msg_type == "group" else message.user_id
+                
+                ack_req = MessageRequest(
+                    message_type=msg_type,
+                    user_id=target_id if msg_type == "private" else None,
+                    group_id=target_id if msg_type == "group" else None,
+                    message=ack_msg
+                )
+                self.client.send_message(ack_req)
+                logger.info(f"Sent acknowledgment for message from {message.user_id}")
+            except Exception as e:
+                logger.error(f"Failed to send acknowledgment: {e}")
+            
+            # Convert to UnifiedMessage
             
             # Convert to UnifiedMessage
             msg_type = message.message_type or "private"

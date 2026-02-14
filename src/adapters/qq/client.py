@@ -65,11 +65,23 @@ class NapCatClient:
                 await asyncio.sleep(5)  # Reconnect delay
 
     async def _handle_ws_messages(self, websocket):
+        """
+        处理从 WebSocket 接收到的原始消息
+        
+        Args:
+            websocket: websockets.connect 返回的 WebSocket 连接对象
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: 处理消息请求过程中产生的任何异常
+        """
         async for message in websocket:
             try:
                 data = json.loads(message)
-                # Only process message events
-                if data.get("post_type") in ["message", "message_sent"]:
+                # Only process incoming message events, ignore self-sent messages to avoid duplication
+                if data.get("post_type") == "message":
                     qq_message = QQMessage(**data)
                     if self.message_handler:
                         if asyncio.iscoroutinefunction(self.message_handler):
