@@ -21,7 +21,7 @@ app = FastAPI(title="OpenCode API Server")
 
 # 初始化 LLM
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-DEFAULT_MODEL = os.getenv("OPENROUTER_DEFAULT_MODEL", "gemini-1.5-flash")
+DEFAULT_MODEL = os.getenv("OPENROUTER_DEFAULT_MODEL", "gemini-2.0-flash")
 
 def extract_text(content: Any) -> str:
     """从 OpenAI 格式的内容中提取纯文本"""

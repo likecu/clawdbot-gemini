@@ -9,7 +9,7 @@ from typing import Optional, Any, List, Dict
 import os
 
 
-def init_gemini(api_key: Optional[str] = None, model: str = "gemini-1.5-flash") -> Any:
+def init_gemini(api_key: Optional[str] = None, model: str = "gemini-2.0-flash") -> Any:
     """
     初始化Gemini模型
 
@@ -51,7 +51,7 @@ def get_response(model: Any, user_message: str) -> str:
     """
     try:
         response = model.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             contents=user_message
         )
         return response.text
@@ -108,7 +108,7 @@ def get_response_with_history(model: Any,
         })
         
         response = model.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             contents=contents
         )
         return response.text
