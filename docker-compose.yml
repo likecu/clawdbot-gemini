@@ -84,7 +84,7 @@ networks:
         - subnet: 172.28.0.0/16
   napcat_network:
     external: true
-    name: napcatqq_default
+    name: clawdbot-gemini_default
 
 
 volumes:
