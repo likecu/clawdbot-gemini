@@ -116,6 +116,7 @@ class ClawdbotApplication:
                     return {"status": "ignored", "reason": "missing content or session_id"}
                 
                 logger.info(f"收到 Clawdbot 实时推送 [Session: {session_id}]: {content[:50]}...")
+                logger.info(f"Callback raw session_id: {session_id}")
                 
                 # Session ID 解析策略
                 # 优先解析新格式: "platform:type:chat_id"

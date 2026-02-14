@@ -78,7 +78,7 @@ class ClawdbotClient:
             }
             
             logger.info(f"调用 Clawdbot HTTP API: {self.base_url}/chat")
-            logger.info(f"Session ID: {session_id}")
+            logger.info(f"Request Payload SessionID: {session_id}, CallbackID: {callback_session_id}")
             logger.debug(f"消息: {user_message[:50]}...")
             
             # 发送 HTTP 请求（增加超时时间以支持工具执行）

@@ -117,6 +117,7 @@ class Agent:
             if len(prompt_messages) > 0 and isinstance(prompt_messages[0], dict):
                 prompt_messages[0]["session_id"] = session_id
                 prompt_messages[0]["callback_session_id"] = callback_session_id or session_id
+                self.logger.info(f"Injecting session info -> session_id: {session_id}, callback_session_id: {prompt_messages[0]['callback_session_id']}")
             
             self.logger.info(f"OpenClaw session: {session_id}, callback: {callback_session_id}")
             

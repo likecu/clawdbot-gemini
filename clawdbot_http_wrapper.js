@@ -399,7 +399,9 @@ app.post('/chat', async (req, res) => {
     const sessionId = session_id || 'qq:user:unknown';
     // callback_session_id 用于消息回调路由，包含消息类型和目标 chat_id
     const callbackSessionId = callback_session_id || sessionId;
-    console.log(`[${new Date().toISOString()}] /chat SessionID=${sessionId}, CallbackID=${callbackSessionId}, Message=${message?.substring(0, 30)}...`);
+
+    console.log(`[${new Date().toISOString()}] /chat SessionID=${sessionId}, CallbackID=${callbackSessionId}`);
+    console.log(`[${new Date().toISOString()}] Message=${message?.substring(0, 30)}...`);
 
     const enrichedMessage = `${message}\n\n(Note: You have FULL access to tools. Please use the 'exec' tool to run Python scripts or other commands to get actual results. Do NOT simulate execution.)`;
 
@@ -434,6 +436,7 @@ app.post('/chat', async (req, res) => {
         for (const p of payloads) {
             if (p.text) {
                 // 使用 callbackSessionId 进行回调路由（包含消息类型和目标 chat_id）
+                console.log(`[${new Date().toISOString()}] Routing callback to: ${callbackSessionId}`);
                 sendCallback(callbackSessionId, p.text);
                 sentCount++;
                 finalReply = p.text;
