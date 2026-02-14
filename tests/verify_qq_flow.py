@@ -8,7 +8,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from channels.qq.adapter import QQChannel
 from core.agent import Agent
-from channels.models import UnifiedSendRequest
+from channels.base import UnifiedSendRequest
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
