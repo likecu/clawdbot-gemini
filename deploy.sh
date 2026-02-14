@@ -27,6 +27,16 @@ fi
 # 总是同步 .env.opencode，因为它也被 docker-compose 引用
 scp -i ${SSH_KEY} .env.opencode ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/.env.opencode
 
+# 1.1 同步 SOUL.md (人格设定)
+echo -e "${GREEN}>>> 正在同步 SOUL.md...${NC}"
+if [ -f "../SOUL.md" ]; then
+    scp -i ${SSH_KEY} "../SOUL.md" ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/SOUL.md
+elif [ -f "SOUL.md" ]; then
+    scp -i ${SSH_KEY} "SOUL.md" ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/SOUL.md
+else
+    echo -e "${RED}>>> ⚠️ 未找到 SOUL.md (无法加载自定义人格导致 Is a directory 错误)${NC}"
+fi
+
 # 2. 远程更新代码并重启容器
 echo -e "${GREEN}>>> 正在远程操作...${NC}"
 ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} 'bash -s' << 'EOF'
