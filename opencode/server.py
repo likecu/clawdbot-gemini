@@ -23,6 +23,23 @@ app = FastAPI(title="OpenCode API Server")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 DEFAULT_MODEL = os.getenv("OPENROUTER_DEFAULT_MODEL", "gemma-3-27b-it")
 
+def extract_text(content: Any) -> str:
+    """从 OpenAI 格式的内容中提取纯文本"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = []
+        for part in content:
+            if isinstance(part, dict):
+                if "text" in part:
+                    texts.append(part["text"])
+                elif "type" in part and part["type"] == "text" and "text" in part:
+                    texts.append(part["text"])
+            elif isinstance(part, str):
+                texts.append(part)
+        return "".join(texts)
+    return str(content)
+
 gemini_client = None
 
 @app.on_event("startup")
@@ -77,11 +94,11 @@ async def chat_completions(request: Request):
         # Gemini 期望: [{'role': 'user'/'model', 'parts': [text]}]
         for msg in messages[:-1]:
             role = "user" if msg["role"] == "user" else "model"
-            content = msg.get("content", "")
+            content = extract_text(msg.get("content", ""))
             if content:
                 history.append({"role": role, "parts": [content]})
         
-        last_user_msg = messages[-1].get("content", "")
+        last_user_msg = extract_text(messages[-1].get("content", ""))
         
         logger.info(f"Generating response for model: {model_name}")
         

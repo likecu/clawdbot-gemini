@@ -85,7 +85,17 @@ def get_response_with_history(model: Any,
             for msg in history:
                 role = msg.get("role", "user")
                 parts = msg.get("parts", [])
-                text_content = parts[0] if parts else ""
+                
+                # 确保 parts[0] 是字符串，如果不是则尝试提取
+                raw_content = parts[0] if parts else ""
+                if isinstance(raw_content, str):
+                    text_content = raw_content
+                elif isinstance(raw_content, list):
+                    # 处理嵌套列表的情况
+                    text_content = "".join([p.get("text", str(p)) if isinstance(p, dict) else str(p) for p in raw_content])
+                else:
+                    text_content = str(raw_content)
+
                 contents.append({
                     "role": role,
                     "parts": [{"text": text_content}]
