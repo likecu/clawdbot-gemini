@@ -101,10 +101,19 @@ class Agent:
             user_memory = self.memory_bank.get_user_memory(real_user_id)
             
             # 3. 动态合并
+            # [Optimization] 注入强身份边界，防止串台
+            strict_session_context = (
+                f"\n\n## ⚠️ Session Context Enforcement (CRITICAL)\n"
+                f"Current Session User ID: {real_user_id}\n"
+                f"You are communicating EXCLUSIVELY with the user identified as '{real_user_id}'.\n"
+                f"Do NOT reference or confuse this user with any other users (e.g. 'Xiao Yang' vs 'Han Zong') unless explicitly asked.\n"
+                f"Treat this session's memory as isolated."
+            )
+
             if user_memory:
-                full_system_prompt = f"{base_system}\n\n## 关于该用户的长期记忆 (Always Remember)\n{user_memory}"
+                full_system_prompt = f"{base_system}\n{strict_session_context}\n\n## 关于该用户的长期记忆 (Always Remember)\n{user_memory}"
             else:
-                full_system_prompt = base_system
+                full_system_prompt = f"{base_system}\n{strict_session_context}"
 
             history = self.session_manager.get_history(session_id)
             prompt_messages = self.prompt_builder.build_conversation_prompt(
