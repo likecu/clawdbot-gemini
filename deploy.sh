@@ -27,17 +27,15 @@ fi
 # 总是同步 .env.opencode，因为它也被 docker-compose 引用
 scp -i ${SSH_KEY} .env.opencode ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/.env.opencode
 
-# 1.1 同步 SOUL.md (人格设定)
-echo -e "${GREEN}>>> 正在同步 SOUL.md...${NC}"
+# 2. 定位 SOUL.md 本地路径 (不上传，等 git reset 后再传)
+SOUL_MD_LOCAL=""
 if [ -f "../SOUL.md" ]; then
-    scp -i ${SSH_KEY} "../SOUL.md" ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/SOUL.md
+    SOUL_MD_LOCAL="../SOUL.md"
 elif [ -f "SOUL.md" ]; then
-    scp -i ${SSH_KEY} "SOUL.md" ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/SOUL.md
-else
-    echo -e "${RED}>>> ⚠️ 未找到 SOUL.md (无法加载自定义人格导致 Is a directory 错误)${NC}"
+    SOUL_MD_LOCAL="SOUL.md"
 fi
 
-# 2. 远程更新代码并重启容器
+# 3. 远程更新代码
 echo -e "${GREEN}>>> 正在远程操作...${NC}"
 ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} 'bash -s' << 'EOF'
     set -e # 遇到错误立即停止
@@ -61,12 +59,10 @@ ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} 'bash -s' << 'EOF'
         docker rm clawd-ai-tavern-1 || true
     fi
 
-    echo -e "${GREEN}>>> 3.1 确保 NapCat 容器存在...${NC}"
-    # 先启动一次以确保容器存在
+    echo -e "${GREEN}>>> 3. 确保 NapCat 容器存在...${NC}"
     docker-compose -f napcat_compose.yml up -d
 
-    echo -e "${GREEN}>>> 3.2 更新 NapCat 配置 (docker exec)...${NC}"
-    # 写入配置到临时文件，然后移动到容器内
+    echo -e "${GREEN}>>> 4. 更新 NapCat 配置 (docker exec)...${NC}"
     cat > /tmp/napcat_onebot11.json << 'JSON'
 {
   "http": {
@@ -118,20 +114,21 @@ ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} 'bash -s' << 'EOF'
   "parseMultMsg": false
 }
 JSON
-    # 使用 docker exec 写入配置 (root 权限)
     docker cp /tmp/napcat_onebot11.json napcatqq:/app/napcat/config/onebot11_2745708378.json
     docker cp /tmp/napcat_onebot11.json napcatqq:/app/napcat/config/onebot11.json
     rm /tmp/napcat_onebot11.json
-    
-    # 重启 napcat 以应用配置
-    docker restart napcatqq || true
 
-    echo -e "${GREEN}>>> 4. 启动 ClawdBots 服务...${NC}"
-    # 重新构建并启动主服务
+    # 清理 SOUL.md 目录冲突 (Docker 可能自动创建了目录)
+    echo -e "${GREEN}>>> 5. 清理 SOUL.md 目录冲突...${NC}"
+    if [ -d "SOUL.md" ]; then
+        echo "检测到 SOUL.md 是目录，正在删除..."
+        rm -rf SOUL.md
+    fi
+
+    echo -e "${GREEN}>>> 6. 启动 ClawdBots 服务...${NC}"
     docker-compose up -d --build
 
-    echo -e "${GREEN}>>> 5. 同步 Host 端 Wrapper (Git 优先)...${NC}"
-    # 从仓库的 deployment 目录同步到运行目录
+    echo -e "${GREEN}>>> 7. 同步 Host 端 Wrapper (Git 优先)...${NC}"
     if [ -f "deployment/clawdbot_http_wrapper.js" ]; then
         echo "Syncing clawdbot_http_wrapper.js from repo..."
         cp deployment/clawdbot_http_wrapper.js /home/milk/clawd/clawdbot_http_wrapper.js
@@ -140,23 +137,32 @@ JSON
         /home/milk/.npm-global/bin/pm2 restart clawdbot-wrapper || echo "PM2 restart failed, is it running?"
     fi
 
-    echo -e "${GREEN}>>> 7. 清理没用的镜像...${NC}"
+    echo -e "${GREEN}>>> 8. 清理没用的镜像...${NC}"
     docker image prune -f
 EOF
 
-# 2.1 更新 Host 上的 Clawdbot 配置 (保持 scp 用于敏感配置，或根据用户需求调整)
-# 注意：clawdbot.json 包含敏感 Key，暂不放入 Git，维持现状或通过其他安全方式
+# 4. 上传 SOUL.md (在 git reset 之后，避免被 git clean 删除)
+if [ -n "$SOUL_MD_LOCAL" ]; then
+    echo -e "${GREEN}>>> 正在同步 SOUL.md...${NC}"
+    scp -i ${SSH_KEY} "$SOUL_MD_LOCAL" ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/SOUL.md
+    # 重启 clawdbot 容器以加载新的 SOUL.md
+    echo -e "${GREEN}>>> 重启 clawdbot 以加载 SOUL.md...${NC}"
+    ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_PATH} && docker-compose restart clawdbot"
+else
+    echo -e "${RED}>>> ⚠️ 未找到 SOUL.md，跳过人格设定同步${NC}"
+fi
+
+# 5. 同步敏感配置 (非 Git)
 if [[ "$*" != *"--docker-only"* ]]; then
     echo -e "${GREEN}>>> 正在同步敏感配置 (非 Git)...${NC}"
     
-    # 确保本地文件存在
     if [ -f "../clawdbot.json" ]; then
         echo "Uploading clawdbot.json via scp..."
         scp -i ${SSH_KEY} ../clawdbot.json ${REMOTE_USER}@${REMOTE_HOST}:/home/${REMOTE_USER}/.clawdbot/clawdbot.json
     fi
 fi
 
-# 3. 验证
+# 6. 验证
 echo -e "${GREEN}>>> 部署完成，正在检查服务状态...${NC}"
 ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
 
