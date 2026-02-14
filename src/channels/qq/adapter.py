@@ -81,13 +81,15 @@ class QQChannel(BaseChannel):
             
             target_id = int(raw_id)
             
-            # Filter asterisks as requested by user
-            cleaned_content = request.content.replace("*", "")
-            
+            # Prepare message request
+            msg_type = request.message_type
+            if msg_type == "user":
+                msg_type = "private"
+                
             qq_req = MessageRequest(
-                message_type=request.message_type,
-                user_id=target_id if request.message_type == "private" else None,
-                group_id=target_id if request.message_type == "group" else None,
+                message_type=msg_type,
+                user_id=target_id if msg_type == "private" else None,
+                group_id=target_id if msg_type == "group" else None,
                 message=cleaned_content
             )
             
