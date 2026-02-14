@@ -27,7 +27,7 @@ fi
 # 总是同步 .env.opencode，因为它也被 docker-compose 引用
 scp -i ${SSH_KEY} .env.opencode ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/.env.opencode
 
-# 2. 定位 SOUL.md 本地路径 (不上传，等 git reset 后再传)
+# 2. 定位 SOUL.md 本地路径
 SOUL_MD_LOCAL=""
 if [ -f "../SOUL.md" ]; then
     SOUL_MD_LOCAL="../SOUL.md"
@@ -124,8 +124,27 @@ JSON
         echo "检测到 SOUL.md 是目录，正在删除..."
         rm -rf SOUL.md
     fi
+EOF
 
-    echo -e "${GREEN}>>> 6. 启动 ClawdBots 服务...${NC}"
+# 4. 上传 SOUL.md（必须在 docker-compose up 之前，否则 Docker 会将其创建为目录）
+if [ -n "$SOUL_MD_LOCAL" ]; then
+    echo -e "${GREEN}>>> 正在同步 SOUL.md (docker-compose up 之前)...${NC}"
+    scp -i ${SSH_KEY} "$SOUL_MD_LOCAL" ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/SOUL.md
+else
+    echo -e "${RED}>>> ⚠️ 未找到 SOUL.md，跳过人格设定同步${NC}"
+fi
+
+# 5. 启动服务和后续清理（新的远程 SSH 块）
+echo -e "${GREEN}>>> 正在启动服务...${NC}"
+ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} 'bash -s' << 'EOF'
+    set -e
+    GREEN='\033[0;32m'
+    NC='\033[0m'
+    cd /home/milk/clawdbot-gemini || exit 1
+
+    echo -e "${GREEN}>>> 6. 重建并启动 ClawdBots 服务...${NC}"
+    # 先删旧容器，清除可能缓存的错误 mount 信息
+    docker-compose rm -sf clawdbot || true
     docker-compose up -d --build
 
     echo -e "${GREEN}>>> 7. 同步 Host 端 Wrapper (Git 优先)...${NC}"
@@ -141,16 +160,6 @@ JSON
     docker image prune -f
 EOF
 
-# 4. 上传 SOUL.md (在 git reset 之后，避免被 git clean 删除)
-if [ -n "$SOUL_MD_LOCAL" ]; then
-    echo -e "${GREEN}>>> 正在同步 SOUL.md...${NC}"
-    scp -i ${SSH_KEY} "$SOUL_MD_LOCAL" ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/SOUL.md
-    # 重启 clawdbot 容器以加载新的 SOUL.md
-    echo -e "${GREEN}>>> 重启 clawdbot 以加载 SOUL.md...${NC}"
-    ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} "cd ${REMOTE_PATH} && docker-compose restart clawdbot"
-else
-    echo -e "${RED}>>> ⚠️ 未找到 SOUL.md，跳过人格设定同步${NC}"
-fi
 
 # 5. 同步敏感配置 (非 Git)
 if [[ "$*" != *"--docker-only"* ]]; then
