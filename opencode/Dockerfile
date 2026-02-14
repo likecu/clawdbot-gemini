@@ -3,7 +3,7 @@ FROM node:18-slim
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --production
+RUN apt-get update && apt-get install -y curl && npm install --production
 
 COPY server.js .
 
