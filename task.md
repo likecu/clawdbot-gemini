@@ -6,7 +6,8 @@
 
 ## Phase 2: Channel Adapters (Sub-agent: Integration Specialist)
 - [x] Implement `src/channels/lark/adapter.py` based on `src/adapters/lark/lark_client.py`
-- [ ] Implement `src/channels/qq/adapter.py` based on `src/adapters/qq/client.py`
+- [/] Implement `src/channels/qq/adapter.py` based on `src/adapters/qq/client.py`
+    - [x] Filter asterisks from outgoing messages
 - [/] Refactor `requirements.txt` if needed (no major dependency changes anticipated)
 
 ## Phase 3: Core Integration (Sub-agent: Backend Developer)

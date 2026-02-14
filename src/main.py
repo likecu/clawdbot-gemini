@@ -11,6 +11,7 @@ import signal
 import logging
 import asyncio
 from typing import Optional, Dict
+from datetime import datetime
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket
@@ -28,6 +29,7 @@ from adapters.llm.clawdbot_client import ClawdbotClient
 from core import Agent, create_agent
 from core.session import create_session_manager
 from core.prompt import create_prompt_builder
+from core.memory import create_memory_bank
 from infrastructure.redis_client import create_redis_client
 from config import get_settings
 
@@ -146,8 +148,12 @@ class ClawdbotApplication:
                 else:
                     return {"status": "error", "message": "Unknown session format"}
                 
-                req.message_type = msg_type
-                req.chat_id = chat_id
+                from channels.base import UnifiedSendRequest
+                req = UnifiedSendRequest(
+                    chat_id=chat_id,
+                    content=content,
+                    message_type=msg_type
+                )
 
                 success = await self.channel_manager.send_message(platform, req)
                 
@@ -268,7 +274,21 @@ class ClawdbotApplication:
                 max_history=self.settings.session_max_history
             )
             
-            prompt_builder = create_prompt_builder()
+            # 初始化记忆库
+            create_memory_bank()
+            
+            # 尝试加载外部人格文件
+            system_prompt = None
+            soul_path = "/app/SOUL.md"
+            if os.path.exists(soul_path):
+                try:
+                    with open(soul_path, "r", encoding="utf-8") as f:
+                        system_prompt = f.read()
+                    logger.info(f"已加载外部人格文件 SOUL.md (长度: {len(system_prompt)})")
+                except Exception as e:
+                    logger.error(f"加载 SOUL.md 失败: {e}")
+
+            prompt_builder = create_prompt_builder(system_prompt=system_prompt)
             
             self.agent = create_agent(
                 llm_client=self.llm_client,
@@ -400,20 +420,33 @@ class ClawdbotApplication:
 
             logger.info(f"[{message.platform}] Received: {user_text[:100]}... from {message.user_id} in {message.chat_id}")
 
-            # 5. Construct Session ID
-            # 格式: platform:type:id (例如 qq:private:123456)
-            # 这将被传递给 Agent 并最终传递给 Clawdbot CLI
-            session_id = f"{message.platform}:{message.message_type}:{message.chat_id}"
+            # 5. Construct Session IDs
+            # session_id: 按用户维度隔离，用于会话记忆和 OpenClaw sessionKey
+            # 格式: platform:user:user_id:DATE (例如 qq:user:123456:20240214)
+            # 增加日期后缀以实现每日自动新会话
+            today_str = datetime.now().strftime("%Y%m%d")
+            session_id = f"{message.platform}:user:{message.user_id}:{today_str}"
+            
+            # callback_session_id: 用于消息回传路由，包含消息类型和目标 chat_id
+            # 格式: platform:type:chat_id (例如 qq:private:123456 或 qq:group:789)
+            callback_session_id = f"{message.platform}:{message.message_type}:{message.chat_id}"
             
             # 6. Agent Processing
             result = await self.agent.process_message(
                 user_id=f"{message.platform}:{message.user_id}",
                 chat_id=session_id,
-                message=user_text
+                message=user_text,
+                callback_session_id=callback_session_id
             )
 
             if result["success"]:
                 response_text = result["text"]
+                
+                # [Fix] 如果响应文本为空（例如已通过回调发送），则不发送消息
+                if not response_text:
+                    logger.info(f"Response text is empty (handled via callback?), skipping UnifiedSendRequest.")
+                    return
+
                 reply = UnifiedSendRequest(
                     chat_id=message.chat_id, # Reply to the same chat_id
                     content=response_text,

@@ -56,28 +56,25 @@ class ClawdbotClient:
             if not user_message:
                 return "抱歉，我没有收到您的消息。"
             
-            # 尝试从消息列表中提取 session_id
-            session_id = "qq_default"
+            # 从消息列表中提取 session_id 和 callback_session_id
+            # session_id: 用于 OpenClaw 的 sessionKey（按用户维度隔离）
+            # callback_session_id: 用于消息回调路由（包含消息类型和目标 chat_id）
+            session_id = "qq:user:unknown"
+            callback_session_id = session_id
+            
             if len(messages) > 0 and isinstance(messages[0], dict):
-                # 优先直接使用传入的 session_id
                 if "session_id" in messages[0]:
                     session_id = messages[0]["session_id"]
-                # 备选：从 system prompt 中提取 [SESSION:xxx] 标签
-                elif messages[0].get("role") == "system" and isinstance(messages[0].get("content"), str):
-                    content = messages[0]["content"]
-                    import re
-                    match = re.search(r'\[SESSION:([^\]]+)\]', content)
-                    if match:
-                        session_id = match.group(1)
-            
-            # 如果 session_id 包含冒号，在调用 CLI 前可能需要处理，但我们的 HTTP Wrapper 会负责
-            # 这里保持原样或转换为 Wrapper 期望的格式
-            # Wrapper 只是把这个 ID 传给 CLI --to 参数
+                if "callback_session_id" in messages[0]:
+                    callback_session_id = messages[0]["callback_session_id"]
+                else:
+                    callback_session_id = session_id
             
             # 构建请求数据
             payload = {
                 "message": user_message,
-                "session_id": session_id
+                "session_id": session_id,
+                "callback_session_id": callback_session_id
             }
             
             logger.info(f"调用 Clawdbot HTTP API: {self.base_url}/chat")
@@ -102,16 +99,17 @@ class ClawdbotClient:
                             # 如果是回调模式，且最终回复是默认占位符，说明所有内容都已通过回调发出了
                             if reply_text == "任务已完成。" or not reply_text:
                                 logger.info("所有响应已通过回调发送，忽略此占位符回复")
-                                return "(已全部实时发送)"
+                                return ""  # 返回空字符串，防止重复发送
                             
-                            # 如果有新内容，则返回新内容
-                            return reply_text
+                            # 如果是回调模式，假设内容已通过实时推送发送，此处不再返回文本
+                            logger.info(f"回调模式: 忽略HTTP响应文本 (长度: {len(reply_text)})，防止重复发送")
+                            return ""  # 返回空字符串，防止重复发送
                         
                         if reply_text:
                             # 过滤掉默认的占位符回复
                             if reply_text.strip() == "任务已完成。":
                                 logger.info("屏蔽默认占位符回复: 任务已完成。")
-                                return "（任务已执行，但无具体返回内容）"
+                                return "" # 虽然一般非callback不会这样，但也屏蔽吧
                             return reply_text
                         else:
                             return "收到消息，但暂时无法生成回复。"

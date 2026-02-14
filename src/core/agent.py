@@ -10,6 +10,7 @@ from enum import Enum
 
 from .session import get_session_manager, SessionManager
 from .prompt import get_prompt_builder, PromptBuilder
+from .memory import get_memory_bank, MemoryBank
 
 
 class AgentMode(Enum):
@@ -43,6 +44,7 @@ class Agent:
         self.llm_client = llm_client
         self.session_manager = session_manager or get_session_manager()
         self.prompt_builder = prompt_builder or get_prompt_builder()
+        self.memory_bank = get_memory_bank()
         
         self.logger = logging.getLogger(__name__)
         self.current_mode = AgentMode.CONVERSATION
@@ -50,22 +52,36 @@ class Agent:
     
     async def process_message(self, user_id: str,
                         chat_id: str,
-                        message: str) -> Dict[str, Any]:
+                        message: str,
+                        callback_session_id: Optional[str] = None) -> Dict[str, Any]:
         """
         处理用户消息
         
         Args:
-            user_id: 用户ID
-            chat_id: 聊天会话ID
+            user_id: 用户ID（格式: platform:user_id）
+            chat_id: 会话ID（格式: platform:user:user_id，用于会话隔离）
             message: 用户消息
+            callback_session_id: 回调路由ID（格式: platform:type:chat_id，用于消息回传），
+                                 如果为 None 则使用 chat_id
             
         Returns:
             Dict: 包含响应文本和处理元信息的字典
         """
-        session_id = f"{user_id}:{chat_id}"
+        # 直接使用 chat_id 作为会话键（已经是按用户隔离的格式）
+        session_id = chat_id
         
         try:
-            self.logger.info(f"处理消息: user={user_id}, chat={chat_id}, message={message[:50]}...")
+            self.logger.info(f"处理消息: user={user_id}, session={session_id}, message={message[:50]}...")
+            
+            # [新增] 处理重置指令
+            if message.strip() in ["/reset", "/clear", "重置", "清除记忆"]:
+                self.session_manager.clear_session(session_id)
+                return {
+                    "success": True,
+                    "text": "记忆已重擦除。我是全新的小汉堡，我们重新开始吧！",
+                    "mode": "conversation",
+                    "usage": {}
+                }
             
             # 检测用户意图
             intent = self._detect_intent(message)
@@ -73,27 +89,36 @@ class Agent:
             self.current_mode = mode
             
             # 构建提示词
+            # 1. 获取全局人格
+            base_system = self.prompt_builder.system_prompt
+            
+            # 2. 获取用户专属记忆
+            real_user_id = user_id.split(":")[-1] # extract user id part if formatted like platform:user_id
+            if ":" in user_id: 
+                 # user_id passed is "qq:123456", memory needs unique ID. Using full string is fine too but user requested per user.
+                 real_user_id = user_id 
+            
+            user_memory = self.memory_bank.get_user_memory(real_user_id)
+            
+            # 3. 动态合并
+            if user_memory:
+                full_system_prompt = f"{base_system}\n\n## 关于该用户的长期记忆 (Always Remember)\n{user_memory}"
+            else:
+                full_system_prompt = base_system
+
             history = self.session_manager.get_history(session_id)
             prompt_messages = self.prompt_builder.build_conversation_prompt(
-                history, message, include_system=True
+                history, message, include_system=True, system_prompt_override=full_system_prompt
             )
             
-            # 为 OpenClaw 添加 session_id 到消息列表
-            # 格式：platform:type:chat_id (例如 qq:private:123456)
-            # 这样在 main.py 的回调中可以稳健地解析
-            openclaw_session_id = f"{user_id}:{chat_id}"
-            
-            # 兼容性处理：如果是 qq_ 开头且没有冒号，可能是旧格式，但这行代码确保生成新格式
-            # user_id 已经是 platform:id 格式，chat_id 可能是 platform_type_id 或者原始 id
-            
-            if ":" not in openclaw_session_id:
-                # 兜底转换
-                openclaw_session_id = openclaw_session_id.replace("_", ":")
+            # 在第一条消息中注入 session 信息，供 ClawdbotClient 提取
+            # session_id: 用于 OpenClaw 的 sessionKey（按用户隔离）
+            # callback_session_id: 用于回调路由（包含消息类型和目标 chat_id）
             if len(prompt_messages) > 0 and isinstance(prompt_messages[0], dict):
-                # 在第一条消息中添加 session_id
-                prompt_messages[0]["session_id"] = openclaw_session_id
+                prompt_messages[0]["session_id"] = session_id
+                prompt_messages[0]["callback_session_id"] = callback_session_id or session_id
             
-            self.logger.debug(f"OpenClaw session ID: {openclaw_session_id}")
+            self.logger.info(f"OpenClaw session: {session_id}, callback: {callback_session_id}")
             
             # 调用LLM
             response = await self._call_llm(prompt_messages, mode)

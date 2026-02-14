@@ -74,7 +74,8 @@ def example():
     
     def build_conversation_prompt(self, history: List[Dict[str, str]],
                                    current_message: str,
-                                   include_system: bool = True) -> List[Dict[str, str]]:
+                                   include_system: bool = True,
+                                   system_prompt_override: Optional[str] = None) -> List[Dict[str, str]]:
         """
         构建对话提示词
         
@@ -89,9 +90,11 @@ def example():
         messages = []
         
         if include_system:
+            # Use override if provided, else fall back to instance default
+            sys_prompt = system_prompt_override if system_prompt_override else self.system_prompt
             messages.append({
                 "role": "system",
-                "content": self.system_prompt
+                "content": sys_prompt
             })
         
         # 添加历史消息
