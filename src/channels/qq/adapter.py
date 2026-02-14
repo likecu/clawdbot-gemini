@@ -61,10 +61,22 @@ class QQChannel(BaseChannel):
             # "private": user_id=123
             # "group": group_id=456
             
-            # Try to parse chat_id which might be prefixed (e.g. qq_private_123456)
+            # Try to parse chat_id which might be prefixed or suffixed
+            # Examples: "qq:user:123456:20260214", "private_123456", "123456"
             raw_id = str(request.chat_id)
-            if "_" in raw_id:
-                # Extract the last part which should be the ID
+            
+            # 1. 优先处理冒号分隔格式
+            if ":" in raw_id:
+                parts = raw_id.split(":")
+                # 如果是 "platform:user:id:date" 或 "platform:type:id"
+                # 我们寻找中间可能是数字的部分，或者取倒数第二位(如果有日期后缀)
+                # 最稳妥的方法是取所有部分中第一个由纯数字组成的，或者特定的偏移量
+                for p in parts:
+                    if p.isdigit():
+                        raw_id = p
+                        break
+            # 2. 处理下划线分隔格式
+            elif "_" in raw_id:
                 raw_id = raw_id.split("_")[-1]
             
             target_id = int(raw_id)
