@@ -131,10 +131,37 @@ async def chat_completions(request: Request):
             for t in tools:
                 if t["type"] == "function":
                     func = t["function"]
+                    params = func.get("parameters", {"type": "object", "properties": {}})
+                    
+                    # Gemini SDK 期望类型是大写 (OBJECT, STRING, NUMBER 等)
+                    def normalize_types(obj):
+                        if isinstance(obj, dict):
+                            if "type" in obj and isinstance(obj["type"], str):
+                                # 映射小写到大写，或者保持原样
+                                type_map = {
+                                    "string": "STRING",
+                                    "number": "NUMBER",
+                                    "integer": "INTEGER",
+                                    "boolean": "BOOLEAN",
+                                    "array": "ARRAY",
+                                    "object": "OBJECT"
+                                }
+                                obj["type"] = type_map.get(obj["type"].lower(), obj["type"])
+                            
+                            for k, v in obj.items():
+                                normalize_types(v)
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                normalize_types(item)
+                    
+                    import copy
+                    normalized_params = copy.deepcopy(params)
+                    normalize_types(normalized_params)
+
                     gemini_tools_input.append({
                         "name": func["name"],
                         "description": func.get("description", ""),
-                        "parameters": func.get("parameters", {"type": "object", "properties": {}})
+                        "parameters": normalized_params
                     })
 
         # 调用 Gemini (llm.py 中的方法)
