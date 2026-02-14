@@ -115,30 +115,29 @@ JSON
     # 重新构建并启动主服务
     docker-compose up -d --build
 
-    echo -e "${GREEN}>>> 5. 清理没用的镜像...${NC}"
+    echo -e "${GREEN}>>> 5. 同步 Host 端 Wrapper (Git 优先)...${NC}"
+    # 从仓库的 deployment 目录同步到运行目录
+    if [ -f "deployment/clawdbot_http_wrapper.js" ]; then
+        echo "Syncing clawdbot_http_wrapper.js from repo..."
+        cp deployment/clawdbot_http_wrapper.js /home/milk/clawd/clawdbot_http_wrapper.js
+        
+        echo "Restarting clawdbot-wrapper via PM2..."
+        /home/milk/.npm-global/bin/pm2 restart clawdbot-wrapper || echo "PM2 restart failed, is it running?"
+    fi
+
+    echo -e "${GREEN}>>> 7. 清理没用的镜像...${NC}"
     docker image prune -f
 EOF
 
-# 2.1 更新 Host 上的 Clawdbot 配置和 Wrapper (如果不使用 --docker-only)
+# 2.1 更新 Host 上的 Clawdbot 配置 (保持 scp 用于敏感配置，或根据用户需求调整)
+# 注意：clawdbot.json 包含敏感 Key，暂不放入 Git，维持现状或通过其他安全方式
 if [[ "$*" != *"--docker-only"* ]]; then
-    echo -e "${GREEN}>>> 正在更新 Host 端 Clawdbot 配置...${NC}"
+    echo -e "${GREEN}>>> 正在同步敏感配置 (非 Git)...${NC}"
     
     # 确保本地文件存在
     if [ -f "../clawdbot.json" ]; then
-        echo "Uploading clawdbot.json..."
+        echo "Uploading clawdbot.json via scp..."
         scp -i ${SSH_KEY} ../clawdbot.json ${REMOTE_USER}@${REMOTE_HOST}:/home/${REMOTE_USER}/.clawdbot/clawdbot.json
-    else
-        echo -e "${RED}Warning: ../clawdbot.json not found locally. Skipping config upload.${NC}"
-    fi
-
-    if [ -f "../clawdbot_http_wrapper.js" ]; then
-        echo "Uploading clawdbot_http_wrapper.js..."
-        scp -i ${SSH_KEY} ../clawdbot_http_wrapper.js ${REMOTE_USER}@${REMOTE_HOST}:/home/${REMOTE_USER}/clawd/clawdbot_http_wrapper.js
-        
-        echo "Restarting clawdbot-wrapper service..."
-        ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} "/home/milk/.npm-global/bin/pm2 restart clawdbot-wrapper"
-    else
-        echo -e "${RED}Warning: ../clawdbot_http_wrapper.js not found locally. Skipping wrapper upload.${NC}"
     fi
 fi
 
