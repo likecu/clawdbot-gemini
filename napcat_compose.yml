@@ -4,7 +4,7 @@ services:
     image: mlikiowa/napcat-docker:latest
     container_name: napcatqq
     ports:
-      - "3000:3000"
+      - "3051:3000"
       - "8080:8080"
     volumes:
       - ./config:/app/config
