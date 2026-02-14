@@ -51,6 +51,7 @@ services:
       - OPENCODE_API_BASE_URL=http://opencode_service:8082/v1
       - OPENCODE_API_KEY=${OPENCODE_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENROUTER_API_BASE_URL=http://opencode_service:8082/v1
       - LOG_LEVEL=INFO
       - APP_PORT=8081
@@ -58,6 +59,7 @@ services:
       - QQ_HOST=napcatqq
       - QQ_HTTP_PORT=3000
       - QQ_WS_PORT=8080
+      - OCR_ENABLED=${OCR_ENABLED:-true}
     ports:
       - "8081:8081"
     volumes:

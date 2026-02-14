@@ -50,6 +50,9 @@ class Settings:
     qq_host: str = "localhost"
     qq_http_port: int = 3000
     qq_ws_port: int = 3001
+    
+    # OCR Config
+    ocr_enabled: bool = True
 
     
     # Redis配置
@@ -103,6 +106,8 @@ class Settings:
             qq_host=os.getenv("QQ_HOST", "localhost"),
             qq_http_port=int(os.getenv("QQ_HTTP_PORT", 3000)),
             qq_ws_port=int(os.getenv("QQ_WS_PORT", 8080)),
+            
+            ocr_enabled=os.getenv("OCR_ENABLED", "false").lower() == "true",
             
             redis_host=os.getenv("REDIS_HOST", "localhost"),
             redis_port=int(os.getenv("REDIS_PORT", 6379)),

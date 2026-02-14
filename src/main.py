@@ -364,7 +364,8 @@ class ClawdbotApplication:
             user_text = message.content or ""
             
             # 3. 处理图片（全局图片识别拦截器）
-            if message.images and len(message.images) > 0:
+            # 只有在 OCR 功能开启时才执行
+            if self.settings.ocr_enabled and message.images and len(message.images) > 0:
                 logger.info(f"[OCR] 开始处理 {len(message.images)} 张图片...")
                 ocr_results = []
                 
@@ -379,6 +380,11 @@ class ClawdbotApplication:
                     for idx, img_source in enumerate(message.images):
                         try:
                             logger.info(f"[OCR] 处理第 {idx+1} 张图片, 来源: {img_source}")
+                            # ... (original inner loop logic preserved implicitly or we need to copy it if replacing block)
+                             
+                            # Since we are replacing a large block, it's safer to just wrap the condition and 
+                            # keep the implementation logic but I must provide the full replacement content.
+                            # Let's simplify and be safe: I will provide the full logic.
                             temp_path = f"/tmp/unified_img_{message.platform}_{idx}_{message.timestamp}.jpg"
                             
                             # 处理不同来源的图片
@@ -424,14 +430,14 @@ class ClawdbotApplication:
                         combined_ocr = "\n\n".join(ocr_results)
                         user_text = f"{user_text}\n\n[图片分析报告]:\n{combined_ocr}"
                         logger.info(f"[OCR] 成功将 OCR 结果注入消息，识别内容长度: {len(combined_ocr)}")
-                    elif not user_text:
-                        # OCR 失败且无其他文本内容的兜底
-                        user_text = f"{user_text}\n[系统通知: 收到图片但 OCR 解析失败，请联系用户确认图片内容]"
+                    # Remove the fallback that injects error messages into user_text
                 
                 except Exception as ocr_err:
                     logger.error(f"[OCR] 全局 OCR 处理链崩溃: {ocr_err}")
-                    if not user_text:
-                        user_text = "[系统错误: OCR 模块异常]"
+                    # Do NOT set user_text to error message
+            else:
+                 if message.images:
+                     logger.info(f"[OCR] 收到图片但不处理 (OCR_ENABLED={self.settings.ocr_enabled})")
             
             if not user_text and not message.images:
                 return
