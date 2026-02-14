@@ -85,50 +85,32 @@ class GeminiOCR:
         # 模型能力配置文件路径
         self.model_capabilities_file = os.path.join(os.path.dirname(__file__), "model_capabilities.json")
         
-        # 检查模型能力配置文件是否存在，如果不存在则生成
+        # 检查模型能力配置文件是否存在，如果不存在则使用默认配置（避免运行时生成，太慢）
         if not os.path.exists(self.model_capabilities_file):
-            self.generate_model_capabilities()
-        
-        # 加载模型能力配置
-        self.model_capabilities = self.load_model_capabilities()
+            print("模型能力配置文件不存在，使用内置默认配置（跳过耗时检测）")
+            # self.generate_model_capabilities() # 禁用自动生成
+            self.model_capabilities = {} # 将使用下面的默认优先级
+        else:
+            # 加载模型能力配置
+            self.model_capabilities = self.load_model_capabilities()
         
         # 模型优先级列表（优先使用高限额且高性能模型）
         self.model_priority = self.model_capabilities.get("model_priority", {
             "text_only": [
-                "gemma-3-27b-it",
-                "gemma-3-12b-it",
+                "gemini-2.5-flash", 
                 "gemini-2.5-flash-lite",
-                "gemini-2.5-flash",
-                "gemma-3-2b-it",
-                "gemma-3-9b-it",
-                "gemma-2-27b-it",
                 "gemma-2-9b-it",
-                "gemma-1.1-7b-it",
-                "gemma-1-7b-it",
-                "gemma-2-2b-it",
-                "gemma-1.1-2b-it",
-                "gemma-1-2b-it",
-                "gemini-nano",
-                "gemini-2.5-pro",
-                "gemini-1.5-pro",
-                "gemini-ultra",
-                "gemini-experimental"
+                "gemini-1.5-flash"
             ],
             "image_supported": [
                 "gemini-2.5-flash",
-                "gemini-2.5-flash-lite",
                 "gemini-1.5-flash",
-                "gemini-1.5-pro",
-                "gemini-ultra",
-                "gemini-experimental"
+                "gemini-1.5-pro"
             ],
             "document_supported": [
                 "gemini-2.5-flash",
-                "gemini-2.5-flash-lite",
-                "gemini-1.5-pro",
                 "gemini-1.5-flash",
-                "gemini-ultra",
-                "gemini-experimental"
+                "gemini-1.5-pro"
             ]
         })
 
