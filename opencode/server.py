@@ -77,6 +77,7 @@ async def list_models():
 async def chat_completions(request: Request):
     try:
         body = await request.json()
+        logger.info(f"Received request: {body}")
         messages = body.get("messages", [])
         model_name = body.get("model", DEFAULT_MODEL)
         
