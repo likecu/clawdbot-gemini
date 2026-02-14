@@ -82,6 +82,9 @@ class QQChannel(BaseChannel):
             target_id = int(raw_id)
             
             # Prepare message request
+            # Filter asterisks as requested by user
+            cleaned_content = request.content.replace("*", "")
+            
             msg_type = request.message_type
             if msg_type == "user":
                 msg_type = "private"
