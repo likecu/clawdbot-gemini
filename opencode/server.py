@@ -77,8 +77,10 @@ async def list_models():
 async def chat_completions(request: Request):
     try:
         body = await request.json()
-        logger.info(f"Received request: {body}")
         messages = body.get("messages", [])
+        if messages:
+             logger.info(f"System Prompt Length: {len(messages[0].get('content', ''))}")
+             logger.info(f"System Prompt Start: {str(messages[0].get('content', ''))[:500]}...")
         model_name = body.get("model", DEFAULT_MODEL)
         
         if not messages:
