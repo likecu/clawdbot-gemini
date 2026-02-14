@@ -6,6 +6,7 @@ services:
     ports:
       - "3051:3000"
       - "8080:8080"
+      - "6099:6099"
     volumes:
       - ./config:/app/config
       - ./data:/app/data

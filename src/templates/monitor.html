@@ -95,6 +95,16 @@
     <div class="container">
         <h1>Clawdbot QQ 实时监控</h1>
         <div id="status">状态: <span id="connection-status" class="disconnected">未连接</span></div>
+        <div
+            style="margin-top: 10px; padding: 10px; background-color: #e3f2fd; border-radius: 4px; border: 1px solid #bbdefb;">
+            <strong>提示：</strong> 如果上方二维码刷新缓慢，请尝试使用更流畅的官方 WebUI：<br>
+            <a id="webui-link" href="#" target="_blank"
+                style="color: #0277bd; text-decoration: underline; font-weight: bold;">打开 NapCat WebUI</a>
+            <span style="color: #555; font-size: 0.9em; margin-left: 10px;">Token: <code>b1e03dea5754</code></span>
+            <script>
+                document.getElementById('webui-link').href = "//" + window.location.hostname + ":6099/webui";
+            </script>
+        </div>
         <div id="qr-container" style="display:none; margin: 20px auto; width: 256px;"></div>
         <div id="message-log">
             <!-- 消息将在这里显示 -->
