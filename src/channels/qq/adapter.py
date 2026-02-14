@@ -1,3 +1,4 @@
+import re
 from typing import Dict, Any, Optional
 import logging
 import asyncio
@@ -85,8 +86,8 @@ class QQChannel(BaseChannel):
             # Filter asterisks as requested by user
             cleaned_content = request.content.replace("*", "")
 
-            # 同时需要吧两个连续的\n也去除掉
-            cleaned_content = cleaned_content.replace("\\n\\n", "\n")
+            # 将连续多个换行符压缩为单个换行符，保持紧凑排版
+            cleaned_content = re.sub(r'\n{2,}', '\n', cleaned_content)
             
             msg_type = request.message_type
             if msg_type == "user":
