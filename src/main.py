@@ -419,16 +419,20 @@ class ClawdbotApplication:
                                 
                                 if result and result.get("success"):
                                     ocr_text = result.get("response", "")
-                                    ocr_results.append(f"--- 图片 {idx+1} 识别结果 ---\n{ocr_text}")
+                                    if len(message.images) > 1:
+                                        ocr_results.append(f"第 {idx+1} 张图片：{ocr_text}")
+                                    else:
+                                        ocr_results.append(f"{ocr_text}")
                                 else:
-                                    ocr_results.append(f"--- 图片 {idx+1} 识别失败 ---")
+                                    ocr_results.append(f"（第 {idx+1} 张图片无法识别）")
                         except Exception as img_err:
                             logger.error(f"[OCR] 处理单张图片失败: {img_err}")
                     
                     # 4. 注入 OCR 结果到用户文本中
                     if ocr_results:
-                        combined_ocr = "\n\n".join(ocr_results)
-                        user_text = f"{user_text}\n\n[图片分析报告]:\n{combined_ocr}"
+                        combined_ocr = "\n".join(ocr_results)
+                        # Use a more natural phrasing to avoid "System Error" hallucinations
+                        user_text = f"{user_text}\n\n（发送了一张图片，内容包含：\n{combined_ocr}）"
                         logger.info(f"[OCR] 成功将 OCR 结果注入消息，识别内容长度: {len(combined_ocr)}")
                     # Remove the fallback that injects error messages into user_text
                 
