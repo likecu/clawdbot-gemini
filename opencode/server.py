@@ -78,9 +78,13 @@ async def chat_completions(request: Request):
     try:
         body = await request.json()
         messages = body.get("messages", [])
+        tools = body.get("tools", [])
         if messages:
              logger.info(f"System Prompt Length: {len(messages[0].get('content', ''))}")
              logger.info(f"System Prompt Start: {str(messages[0].get('content', ''))[:500]}...")
+        if tools:
+             logger.info(f"Tools provided: {len(tools)} tools")
+             
         model_name = body.get("model", DEFAULT_MODEL)
         
         if not messages:
@@ -96,19 +100,56 @@ async def chat_completions(request: Request):
         # 将 OpenAI 格式转换为 Gemini history 格式
         # Gemini 期望: [{'role': 'user'/'model', 'parts': [text]}]
         for msg in messages[:-1]:
-            role = "user" if msg["role"] == "user" else "model"
+            role = msg["role"]
             content = extract_text(msg.get("content", ""))
-            if content:
-                history.append({"role": role, "parts": [content]})
+            
+            # OpenAI roles: system, user, assistant, tool
+            # Gemini roles for history: user, model
+            if role == "system":
+                # 把 system prompt 也当成 user 消息的起始部分（Gemini 通常如此处理）
+                if content:
+                    history.append({"role": "user", "parts": [content]})
+            elif role == "user":
+                if content:
+                    history.append({"role": "user", "parts": [content]})
+            elif role == "assistant":
+                if content:
+                    history.append({"role": "model", "parts": [content]})
+                # 如果有 tool_calls，Gemini history 格式比较复杂，暂简化为文本描述
+            elif role == "tool":
+                # 工具执行结果
+                if content:
+                    history.append({"role": "user", "parts": [f"工具执行结果: {content}"]})
         
         last_user_msg = extract_text(messages[-1].get("content", ""))
         
         logger.info(f"Generating response for model: {model_name}")
         
+        # 准备工具格式转换
+        gemini_tools_input = []
+        if tools:
+            for t in tools:
+                if t["type"] == "function":
+                    func = t["function"]
+                    gemini_tools_input.append({
+                        "name": func["name"],
+                        "description": func.get("description", ""),
+                        "parameters": func.get("parameters", {"type": "object", "properties": {}})
+                    })
+
         # 调用 Gemini (llm.py 中的方法)
-        response_text = get_response_with_history(gemini_client, last_user_msg, history)
-        logger.info(f"Response generated: {response_text[:100]}...")
+        response_text, tool_calls = get_response_with_history(
+            gemini_client, last_user_msg, history, tools=gemini_tools_input
+        )
+        logger.info(f"Response generated: {response_text[:100]}... (Tools: {len(tool_calls)})")
         
+        message_out = {
+            "role": "assistant",
+            "content": response_text if response_text else None,
+        }
+        if tool_calls:
+            message_out["tool_calls"] = tool_calls
+
         return {
             "id": f"chatcmpl-{int(time.time())}",
             "object": "chat.completion",
@@ -117,11 +158,8 @@ async def chat_completions(request: Request):
             "choices": [
                 {
                     "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": response_text,
-                    },
-                    "finish_reason": "stop",
+                    "message": message_out,
+                    "finish_reason": "tool_calls" if tool_calls else "stop",
                 }
             ],
             "usage": {
