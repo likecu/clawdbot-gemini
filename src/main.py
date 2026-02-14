@@ -26,10 +26,12 @@ from channels.qq.adapter import QQChannel
 
 from adapters.llm import init_client, OpenRouterClient
 from adapters.llm.clawdbot_client import ClawdbotClient
+from adapters.llm.clawdbot_client import ClawdbotClient
 from core import Agent, create_agent
 from core.session import create_session_manager
 from core.prompt import create_prompt_builder
 from core.memory import create_memory_bank
+from core.tools.clawdbot_cli import ClawdbotCliTool
 from infrastructure.redis_client import create_redis_client
 from config import get_settings
 
@@ -297,10 +299,61 @@ class ClawdbotApplication:
 
             prompt_builder = create_prompt_builder(system_prompt=system_prompt)
             
+            # [Clawdbot Integration] define async callback
+            async def agent_notification_callback(session_id: str, content: str):
+                """
+                回调函数：处理来自后台任务（如Clawdbot CLI）的异步通知
+                """
+                try:
+                    logger.info(f"Received async notification for session {session_id}")
+                    
+                    # 解析 session_id 以获取目标 chat_id 和 platform
+                    # 格式可能是 "platform:user:id:date" 或 "platform:type:chat_id"
+                    # 这里我们依赖 agent.py 中传递的 callback_session_id
+                    
+                    platform = "qq"
+                    chat_id = session_id
+                    msg_type = "private"
+                    
+                    if ":" in session_id:
+                        parts = session_id.split(":")
+                        if len(parts) >= 3:
+                            platform = parts[0]
+                            # Assuming format platform:type:chat_id
+                            if parts[1] in ["private", "group"]:
+                                msg_type = parts[1]
+                                chat_id = ":".join(parts[2:])
+                            else:
+                                # Fallback or other format
+                                chat_id = ":".join(parts[1:]) 
+                        elif len(parts) == 2:
+                            platform = parts[0]
+                            chat_id = parts[1]
+                    
+                    # 发送消息
+                    from channels.base import UnifiedSendRequest
+                    req = UnifiedSendRequest(
+                        chat_id=chat_id,
+                        content=content,
+                        message_type=msg_type
+                    )
+                    
+                    success = await self.channel_manager.send_message(platform, req)
+                    if success and platform == "qq":
+                        await self._broadcast_sent_message(platform, chat_id, content, msg_type)
+                        
+                except Exception as e:
+                    logger.error(f"Async Notification Callback failed: {e}")
+
+            # 初始化工具
+            clawdbot_tool = ClawdbotCliTool()
+
             self.agent = create_agent(
                 llm_client=self.llm_client,
                 session_manager=session_manager,
-                prompt_builder=prompt_builder
+                prompt_builder=prompt_builder,
+                clawdbot_tool=clawdbot_tool,
+                notification_callback=agent_notification_callback
             )
             
             # --- Initialize Channels ---

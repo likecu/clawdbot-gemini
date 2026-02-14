@@ -6,14 +6,16 @@
 
 import logging
 import asyncio
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime
 from enum import Enum
 
 from .session import get_session_manager, SessionManager
 from .prompt import get_prompt_builder, PromptBuilder
 from .memory import get_memory_bank, MemoryBank
+from .memory import get_memory_bank, MemoryBank
 from .memory_extractor import get_memory_extractor
+from .tools.clawdbot_cli import ClawdbotCliTool
 
 
 class AgentMode(Enum):
@@ -35,7 +37,9 @@ class Agent:
     
     def __init__(self, llm_client,
                  session_manager: Optional[SessionManager] = None,
-                 prompt_builder: Optional[PromptBuilder] = None):
+                 prompt_builder: Optional[PromptBuilder] = None,
+                 clawdbot_tool: Optional[ClawdbotCliTool] = None,
+                 notification_callback: Optional[Callable] = None):
         """
         初始化智能体
         
@@ -43,12 +47,16 @@ class Agent:
             llm_client: LLM客户端实例
             session_manager: 会话管理器实例
             prompt_builder: 提示词构建器实例
+            clawdbot_tool: Clawdbot CLI 工具实例
+            notification_callback: 异步通知回调函数
         """
         self.llm_client = llm_client
         self.session_manager = session_manager or get_session_manager()
         self.prompt_builder = prompt_builder or get_prompt_builder()
         self.memory_bank = get_memory_bank()
         self.memory_extractor = get_memory_extractor()
+        self.clawdbot_tool = clawdbot_tool
+        self.notification_callback = notification_callback
         
         self.logger = logging.getLogger(__name__)
         self.current_mode = AgentMode.CONVERSATION
@@ -160,6 +168,28 @@ class Agent:
 
             # 调用LLM
             response = await self._call_llm(prompt_messages, mode)
+            
+            # [Clawdbot CLI Integration] 检测是否调用了 CLI 工具
+            import re
+            clawdbot_match = re.search(r'\[Clawdbot:\s*(.*?)\]', response["text"], re.DOTALL)
+            if clawdbot_match:
+                if self.clawdbot_tool and self.notification_callback:
+                    task_prompt = clawdbot_match.group(1).strip()
+                    self.logger.info(f"Detected Clawdbot task: {task_prompt}")
+                    
+                    # 启动异步任务
+                    # 注意：我们传递 callback_session_id 作为 session_id，以确保回调能正确路由
+                    # 如果 session_id 本身已经包含路由信息（如 agent.py中 session_id = chat_id），
+                    # 这里我们使用 callback_session_id 变量，它在 process_message 签名中定义了
+                    
+                    target_session_id = callback_session_id or session_id
+                    await self.clawdbot_tool.run_async(task_prompt, target_session_id, self.notification_callback)
+                    
+                    # 修改返回给用户的立即响应
+                    response["text"] = f"收到，正在调用 Clawdbot 为您处理：{task_prompt}...\n（请稍候，结果将异步发送）"
+                else:
+                    self.logger.warning("Clawdbot tool detected but tool or callback is missing.")
+                    # Optionally append a warning to the text or just log it
             
             # 保存到会话历史
             self.session_manager.add_user_message(session_id, message)
@@ -444,7 +474,9 @@ class Agent:
 # 创建智能体的便捷函数
 def create_agent(llm_client,
                  session_manager: Optional[SessionManager] = None,
-                 prompt_builder: Optional[PromptBuilder] = None) -> Agent:
+                 prompt_builder: Optional[PromptBuilder] = None,
+                 clawdbot_tool: Optional[ClawdbotCliTool] = None,
+                 notification_callback: Optional[Callable] = None) -> Agent:
     """
     创建智能体实例
     
@@ -452,8 +484,10 @@ def create_agent(llm_client,
         llm_client: LLM客户端实例
         session_manager: 会话管理器实例
         prompt_builder: 提示词构建器实例
+        clawdbot_tool: Clawdbot CLI 工具实例
+        notification_callback: 异步通知回调函数
         
     Returns:
         Agent: 智能体实例
     """
-    return Agent(llm_client, session_manager, prompt_builder)
+    return Agent(llm_client, session_manager, prompt_builder, clawdbot_tool, notification_callback)
