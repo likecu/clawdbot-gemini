@@ -5,6 +5,7 @@
 """
 
 import logging
+import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from enum import Enum
@@ -12,6 +13,7 @@ from enum import Enum
 from .session import get_session_manager, SessionManager
 from .prompt import get_prompt_builder, PromptBuilder
 from .memory import get_memory_bank, MemoryBank
+from .memory_extractor import get_memory_extractor
 
 
 class AgentMode(Enum):
@@ -46,6 +48,7 @@ class Agent:
         self.session_manager = session_manager or get_session_manager()
         self.prompt_builder = prompt_builder or get_prompt_builder()
         self.memory_bank = get_memory_bank()
+        self.memory_extractor = get_memory_extractor()
         
         self.logger = logging.getLogger(__name__)
         self.current_mode = AgentMode.CONVERSATION
@@ -158,6 +161,14 @@ class Agent:
             # 保存到会话历史
             self.session_manager.add_user_message(session_id, message)
             self.session_manager.add_assistant_message(session_id, response["text"])
+            
+            # 异步触发记忆更新（每N轮对话自动提取用户信息）
+            updated_history = self.session_manager.get_history(session_id)
+            if self.memory_extractor.should_trigger(len(updated_history)):
+                self.logger.info(f"触发异步记忆更新: user={real_user_id}, history_len={len(updated_history)}")
+                asyncio.create_task(
+                    self._update_user_memory(real_user_id, updated_history)
+                )
             
             self.logger.info(f"响应生成成功: {response['text'][:50]}...")
             
@@ -374,6 +385,27 @@ class Agent:
                 "suggestion": ""
             }
     
+    async def _update_user_memory(self, user_id: str,
+                                    history: List[Dict[str, str]]) -> None:
+        """
+        异步更新用户长期记忆
+        
+        在后台运行，不阻塞主对话流程。
+        从对话历史中提取关键信息并合并到用户记忆文件。
+        
+        Args:
+            user_id: 用户ID (e.g. "qq:254067848")
+            history: 当前会话的对话历史
+        """
+        try:
+            success = await self.memory_extractor.extract_and_update(user_id, history)
+            if success:
+                self.logger.info(f"用户 {user_id} 的长期记忆已自动更新")
+            else:
+                self.logger.warning(f"用户 {user_id} 的长期记忆更新未成功")
+        except Exception as e:
+            self.logger.error(f"异步记忆更新异常: {e}", exc_info=True)
+
     def clear_memory(self, user_id: str, chat_id: str) -> None:
         """
         清空对话记忆
