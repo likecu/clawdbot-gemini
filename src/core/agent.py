@@ -119,8 +119,11 @@ class Agent:
                 f"Current System Time: {current_time} (Trusted Source)\n"
                 f"Current Session User ID: {real_user_id}\n"
                 f"You are communicating EXCLUSIVELY with the user identified as '{real_user_id}'.\n"
-                f"Do NOT reference or confuse this user with any other users (e.g. 'Xiao Yang' vs 'Han Zong') unless explicitly asked.\n"
-                f"Treat this session's memory as isolated.\n"
+                f"\n### 用户隔离规则 (User Isolation Rules)\n"
+                f"1. 你现在只与 '{real_user_id}' 对话。绝对不要把其他用户的记忆、称呼、偏好带入当前对话。\n"
+                f"2. 如果你要编辑或更新 MEMORY.md，只修改属于 '{real_user_id}' 的段落，用 '## 用户 {real_user_id}' 作为该用户的记忆区域标记。\n"
+                f"3. MEMORY.md 中其他用户（不同 ID）的数据必须原封不动保留，不要删除也不要在当前对话引用。\n"
+                f"4. 不要使用其他用户的昵称称呼当前用户。\n"
                 f"Do NOT use any tools to verify the time. The time provided above is authoritative."
             )
 
