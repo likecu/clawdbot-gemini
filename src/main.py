@@ -199,6 +199,7 @@ class ClawdbotApplication:
         @self.app.on_event("startup")
         async def startup_event():
             await self.initialize()
+            asyncio.create_task(self._monitor_napcat_logs())
 
         @self.app.on_event("shutdown")
         async def shutdown_event():
@@ -489,6 +490,63 @@ class ClawdbotApplication:
              await self.ws_manager.broadcast(data)
          except Exception as e:
              logger.error(f"UI Broadcast error: {e}")
+
+    async def _monitor_napcat_logs(self):
+        """Monitor NapCat logs for QR code"""
+        logger.info("Starting NapCat log monitor...")
+        try:
+            import docker
+            client = docker.from_env()
+            container_name = "napcatqq" # Hardcode or use config? Config uses qq_host usually mapped to container name
+            # In settings.py, qq_host default "napcat". docker-compose says "napcatqq".
+            # Let's try to use the name from settings if possible, or fallback/check if settings.qq_host matches.
+            # In docker-compose, container_name is "napcatqq".
+            # In settings.py: qq_host: str = "napcat" (default) or "127.0.0.1". 
+            # If running in docker network, host is "napcat" (service name) or "napcatqq" (container name).
+            # The docker client needs CONTAINER NAME or ID. 
+            container_name = "napcatqq" 
+
+            while True:
+                try:
+                    try:
+                        container = client.containers.get(container_name)
+                    except docker.errors.NotFound:
+                        # logger.warning(f"Container {container_name} not found")
+                        await asyncio.sleep(5)
+                        continue
+
+                    if container.status != "running":
+                        await asyncio.sleep(5)
+                        continue
+
+                    # Get last 50 lines
+                    logs = container.logs(tail=50).decode("utf-8", errors="ignore")
+                    
+                    if "二维码解码URL:" in logs:
+                        for line in logs.split("\n"):
+                            if "二维码解码URL:" in line:
+                                url_line = line.strip()
+                                
+                                qr_path = "logs/qr_code.txt"
+                                current_content = ""
+                                if os.path.exists(qr_path):
+                                    with open(qr_path, "r", encoding="utf-8") as f:
+                                        current_content = f.read().strip()
+                                
+                                if current_content != url_line:
+                                    os.makedirs("logs", exist_ok=True)
+                                    with open(qr_path, "w", encoding="utf-8") as f:
+                                        f.write(url_line)
+                                    logger.info(f"Updated QR code: {url_line}")
+                                break
+                    
+                except Exception as e:
+                    logger.error(f"Error monitoring logs: {e}")
+                
+                await asyncio.sleep(2)
+                
+        except Exception as e:
+             logger.error(f"Failed to start log monitor: {e}")
 
     async def stop(self) -> None:
         """停止应用程序"""
