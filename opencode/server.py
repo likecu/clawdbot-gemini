@@ -104,6 +104,7 @@ async def chat_completions(request: Request):
         
         # 调用 Gemini (llm.py 中的方法)
         response_text = get_response_with_history(gemini_client, last_user_msg, history)
+        logger.info(f"Response generated: {response_text[:100]}...")
         
         return {
             "id": f"chatcmpl-{int(time.time())}",
