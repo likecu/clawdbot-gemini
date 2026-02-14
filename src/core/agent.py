@@ -6,6 +6,7 @@
 
 import logging
 from typing import Optional, Dict, Any, List
+from datetime import datetime
 from enum import Enum
 
 from .session import get_session_manager, SessionManager
@@ -50,10 +51,7 @@ class Agent:
         self.current_mode = AgentMode.CONVERSATION
         self.thinking_enabled = True  # 是否显示思考过程
     
-    async def process_message(self, user_id: str,
-                        chat_id: str,
-                        message: str,
-                        callback_session_id: Optional[str] = None) -> Dict[str, Any]:
+
     async def process_message(self, user_id: str,
                         chat_id: str,
                         message: str,
@@ -110,12 +108,17 @@ class Agent:
             
             # 3. 动态合并
             # [Optimization] 注入强身份边界，防止串台
+            # [Optimization] Inject System Time & Identity Boundary
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S %A")
+            
             strict_session_context = (
                 f"\n\n## ⚠️ Session Context Enforcement (CRITICAL)\n"
+                f"Current System Time: {current_time} (Trusted Source)\n"
                 f"Current Session User ID: {real_user_id}\n"
                 f"You are communicating EXCLUSIVELY with the user identified as '{real_user_id}'.\n"
                 f"Do NOT reference or confuse this user with any other users (e.g. 'Xiao Yang' vs 'Han Zong') unless explicitly asked.\n"
-                f"Treat this session's memory as isolated."
+                f"Treat this session's memory as isolated.\n"
+                f"Do NOT use any tools to verify the time. The time provided above is authoritative."
             )
 
             if user_memory:
