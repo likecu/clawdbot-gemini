@@ -57,21 +57,22 @@ class ClawdbotClient:
                 return "抱歉，我没有收到您的消息。"
             
             # 尝试从消息列表中提取 session_id
-            # Agent 应该在第一条消息的 metadata 中传递 session_id
             session_id = "qq_default"
             if len(messages) > 0 and isinstance(messages[0], dict):
-                # 检查是否有 session_id 在消息中
+                # 优先直接使用传入的 session_id
                 if "session_id" in messages[0]:
                     session_id = messages[0]["session_id"]
-                # 或者从 content 中提取（如果 Agent 使用特殊格式）
+                # 备选：从 system prompt 中提取 [SESSION:xxx] 标签
                 elif messages[0].get("role") == "system" and isinstance(messages[0].get("content"), str):
                     content = messages[0]["content"]
-                    if "[SESSION:" in content:
-                        # 提取格式如 [SESSION:qq_254067848_private]
-                        import re
-                        match = re.search(r'\[SESSION:([^\]]+)\]', content)
-                        if match:
-                            session_id = match.group(1)
+                    import re
+                    match = re.search(r'\[SESSION:([^\]]+)\]', content)
+                    if match:
+                        session_id = match.group(1)
+            
+            # 如果 session_id 包含冒号，在调用 CLI 前可能需要处理，但我们的 HTTP Wrapper 会负责
+            # 这里保持原样或转换为 Wrapper 期望的格式
+            # Wrapper 只是把这个 ID 传给 CLI --to 参数
             
             # 构建请求数据
             payload = {
@@ -95,17 +96,24 @@ class ClawdbotClient:
                         reply_text = result.get("reply", "")
                         is_callback = result.get("is_callback_mode", False)
                         
+                        logger.info(f"Clawdbot 响应: is_callback={is_callback}, reply_length={len(reply_text)}")
+                        
                         if is_callback:
-                            # 如果是回调模式，中间过程已经发过了
-                            # 返回一个简单的结束标志
-                            logger.info("Clawdbot 以回调模式完成任务")
-                            return "(执行完毕)"
+                            # 如果是回调模式，且最终回复是默认占位符，说明所有内容都已通过回调发出了
+                            if reply_text == "任务已完成。" or not reply_text:
+                                logger.info("所有响应已通过回调发送，忽略此占位符回复")
+                                return "(已全部实时发送)"
+                            
+                            # 如果有新内容，则返回新内容
+                            return reply_text
                         
                         if reply_text:
-                            logger.info(f"Clawdbot 回复: {reply_text[:100]}...")
+                            # 过滤掉默认的占位符回复
+                            if reply_text.strip() == "任务已完成。":
+                                logger.info("屏蔽默认占位符回复: 任务已完成。")
+                                return "（任务已执行，但无具体返回内容）"
                             return reply_text
                         else:
-                            logger.warning("未收到有效回复")
                             return "收到消息，但暂时无法生成回复。"
                     else:
                         error_text = await response.text()
