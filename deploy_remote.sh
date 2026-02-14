@@ -18,7 +18,7 @@ ssh -i $SSH_KEY $REMOTE_USER@$REMOTE_HOST << EOF
     echo "📥 强制同步代码 (清理冲突)..."
     git fetch origin main
     git reset --hard origin/main
-    git clean -fd
+    git clean -fd || true
 
     echo "🔄 重启 Docker 容器..."
     # 使用 sudo 如果需要权限，或者确保用户在 docker 组

@@ -36,7 +36,7 @@ ssh -i ${SSH_KEY} ${REMOTE_USER}@${REMOTE_HOST} 'bash -s' << 'EOF'
     echo -e "${GREEN}>>> 1. 强制同步代码 (清理冲突)...${NC}"
     git fetch origin main
     git reset --hard origin/main
-    git clean -fd
+    git clean -fd || true
 
     echo -e "${GREEN}>>> 2. 清理旧的/冲突容器...${NC}"
     # 停止并删除错误的容器 (如果存在)
