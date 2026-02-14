@@ -84,6 +84,9 @@ class QQChannel(BaseChannel):
             # Prepare message request
             # Filter asterisks as requested by user
             cleaned_content = request.content.replace("*", "")
+
+            # 同时需要吧两个连续的\n也去除掉
+            cleaned_content = cleaned_content.replace("\\n\\n", "\n")
             
             msg_type = request.message_type
             if msg_type == "user":
@@ -115,16 +118,14 @@ class QQChannel(BaseChannel):
 
     async def _handle_qq_message(self, message: QQMessage):
         """
-        处理来自 NapCat 的原始 QQ 消息回调，将其转换为统一消息格式并分发
+        处理来自 NapCat 的原始 QQ 消息回调
         
-        Args:
-            message: QQMessage 实例，包含发送者、内容、类型等详细数据
-            
-        Returns:
-            None
-            
-        Raises:
-            Exception: 处理或转换消息过程中的异常
+        将其转换为统一消息格式并分发给全局消息处理器。
+        同时负责解析 CQ 码（如图片）和发送即时接收确认。
+
+        :param message: QQMessage 实例，包含发送者、内容、类型等详细数据
+        :return: None
+        :raises Exception: 处理或转换消息过程中的异常
         """
         try:
             # Filter valid messages

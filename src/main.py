@@ -107,6 +107,12 @@ class ClawdbotApplication:
         async def clawdbot_callback(data: ClawdbotCallbackRequest):
             """
             接收来自 Clawdbot HTTP Wrapper 的实时中间结果并转发给用户
+            
+            当 OpenCode 或其他异步任务产生中间输出时，通过此接口回调。
+            主要用于将代码执行的实时日志推送到前端或聊天窗口。
+
+            :param data: 包含 session_id 和 content 的请求体
+            :return: JSON 响应状态
             """
             try:
                 session_id = data.session_id
@@ -334,6 +340,17 @@ class ClawdbotApplication:
     async def _handle_unified_message(self, message: UnifiedMessage) -> None:
         """
         统一的消息处理入口
+        
+        所有渠道（QQ, Lark）的消息都会汇聚到这里进行处理。
+        流程包含：
+        1. 广播消息到前端 UI
+        2. 文本/图片内容提取与 OCR 处理
+        3. 会话 ID 生成 (按用户+日期隔离)
+        4. 调用 Agent 进行智能处理
+        5. 发送处理结果回原渠道
+
+        :param message: 统一消息对象，屏蔽了底层渠道差异
+        :return: None
         """
         try:
             # 1. Broadcast to UI (if it's a message we want to show)
@@ -439,6 +456,19 @@ class ClawdbotApplication:
                 message=user_text,
                 callback_session_id=callback_session_id
             )
+
+            # [Debug] 发送调试信息
+            if result.get("success") and result.get("debug_info"):
+                debug_msg = f"[Debug Prompt Info]:\n{result.get('debug_info')}"
+                # 分段发送以防过长（简单的分段逻辑，或者直接发送尝试）
+                # 为了不影响主回复，单独发送
+                debug_req = UnifiedSendRequest(
+                    chat_id=message.chat_id,
+                    content=debug_msg,
+                    message_type=message.message_type
+                )
+                await self.channel_manager.send_message(message.platform, debug_req)
+                logger.info("已发送调试提示词信息。")
 
             if result["success"]:
                 response_text = result["text"]

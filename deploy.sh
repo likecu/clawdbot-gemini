@@ -16,11 +16,16 @@ NC='\033[0m' # No Color
 
 echo -e "${GREEN}>>> 开始部署到远程服务器: ${REMOTE_HOST}${NC}"
 
-# 1. 同步环境变量 (可选)
-if [[ "$*" == *"--env"* ]]; then
-    echo -e "${GREEN}>>> 正在同步 .env 文件...${NC}"
-    scp -i ${SSH_KEY} .env .env.opencode ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/
+# 1. 同步环境变量 (强制)
+echo -e "${GREEN}>>> 正在同步环境变量...${NC}"
+if [ -f ".env" ]; then
+    scp -i ${SSH_KEY} .env ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/.env
+else
+    echo -e "${GREEN}>>> 本地 .env 不存在，使用 .env.opencode 作为远程 .env...${NC}"
+    scp -i ${SSH_KEY} .env.opencode ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/.env
 fi
+# 总是同步 .env.opencode，因为它也被 docker-compose 引用
+scp -i ${SSH_KEY} .env.opencode ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/.env.opencode
 
 # 2. 远程更新代码并重启容器
 echo -e "${GREEN}>>> 正在远程操作...${NC}"

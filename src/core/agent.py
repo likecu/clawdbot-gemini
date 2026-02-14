@@ -54,18 +54,26 @@ class Agent:
                         chat_id: str,
                         message: str,
                         callback_session_id: Optional[str] = None) -> Dict[str, Any]:
+    async def process_message(self, user_id: str,
+                        chat_id: str,
+                        message: str,
+                        callback_session_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        处理用户消息
+        核心消息处理函数
         
-        Args:
-            user_id: 用户ID（格式: platform:user_id）
-            chat_id: 会话ID（格式: platform:user:user_id，用于会话隔离）
-            message: 用户消息
-            callback_session_id: 回调路由ID（格式: platform:type:chat_id，用于消息回传），
-                                 如果为 None 则使用 chat_id
-            
-        Returns:
-            Dict: 包含响应文本和处理元信息的字典
+        负责：
+        1. 意图检测 (Intent Detection)
+        2. 上下文管理 (Session Management)
+        3. 提示词构建 (Prompt Construction)
+        4. LLM 调用 (LLM Invocation)
+        5. 结果返回 (Response Generation)
+
+        :param user_id: 用户唯一标识（格式: platform:user_id）
+        :param chat_id: 会话唯一标识（格式: platform:user:user_id:DATE，用于隔离记忆）
+        :param message: 用户发送的原始文本消息
+        :param callback_session_id: 用于回调路由的ID（格式: platform:type:chat_id），若为空则默认使用 chat_id
+        
+        :return: Dict 包含响应文本、状态码、usage信息和调试信息
         """
         # 直接使用 chat_id 作为会话键（已经是按用户隔离的格式）
         session_id = chat_id
@@ -130,6 +138,17 @@ class Agent:
             
             self.logger.info(f"OpenClaw session: {session_id}, callback: {callback_session_id}")
             
+            # [Debug] 检测调试指令
+            debug_info = None
+            if "/debug" in message or "/debug_prompt" in message:
+                import json
+                try:
+                    # 序列化提示词以便阅读
+                    debug_info = json.dumps(prompt_messages, ensure_ascii=False, indent=2)
+                    self.logger.info("Debug flag detected, attaching prompt info.")
+                except Exception as e:
+                    debug_info = f"Error serializing prompt: {str(e)}"
+
             # 调用LLM
             response = await self._call_llm(prompt_messages, mode)
             
@@ -143,7 +162,8 @@ class Agent:
                 "success": True,
                 "text": response["text"],
                 "mode": mode.value,
-                "usage": response.get("usage", {})
+                "usage": response.get("usage", {}),
+                "debug_info": debug_info  # 返回调试信息
             }
             
         except Exception as e:
