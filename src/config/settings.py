@@ -103,7 +103,7 @@ class Settings:
             
 
             
-            gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+            gemini_api_key=os.getenv("GOOGLE_API_KEY", os.getenv("GEMINI_API_KEY", "")),
 
             active_model=os.getenv("ACTIVE_MODEL", "qwen"),
             
