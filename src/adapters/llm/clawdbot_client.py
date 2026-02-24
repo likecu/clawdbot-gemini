@@ -45,18 +45,25 @@ class ClawdbotClient:
             回复文本
         """
         try:
-            # 获取最后一条用户消息
+            # 从 messages 中提取系统提示词和最后一条用户消息
+            system_prompts = []
             user_message = ""
             
             for msg in reversed(messages):
-                if msg.get("role") == "user":
+                if msg.get("role") == "user" and not user_message:
                     user_message = msg.get("content", "")
-                    break
+                elif msg.get("role") == "system":
+                    system_prompts.append(msg.get("content", ""))
             
             if not user_message:
                 return "抱歉，我没有收到您的消息。"
+                
+            system_text = "\n\n".join(reversed(system_prompts))
             
-            # 从消息列表中提取 session_id 和 callback_session_id
+            combined_message = user_message
+            if system_text:
+                # 为了防止指令丢失，将系统上下文强行注入到对话末尾
+                combined_message = f"【系统级强制上下文】\n{system_text}\n\n====================\n\n【用户当前输入】\n{user_message}"
             # session_id: 用于 OpenClaw 的 sessionKey（按用户维度隔离）
             # callback_session_id: 用于消息回调路由（包含消息类型和目标 chat_id）
             session_id = "qq:user:unknown"
@@ -72,14 +79,14 @@ class ClawdbotClient:
             
             # 构建请求数据
             payload = {
-                "message": user_message,
+                "message": combined_message,
                 "session_id": session_id,
                 "callback_session_id": callback_session_id
             }
             
             logger.info(f"调用 Clawdbot HTTP API: {self.base_url}/chat")
             logger.info(f"Request Payload SessionID: {session_id}, CallbackID: {callback_session_id}")
-            logger.debug(f"消息: {user_message[:50]}...")
+            logger.debug(f"消息: {combined_message[:50]}...")
             
             # 发送 HTTP 请求（增加超时时间以支持工具执行）
             async with aiohttp.ClientSession() as session:

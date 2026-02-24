@@ -430,23 +430,32 @@ app.post('/chat', async (req, res) => {
 
         // 提取回复内容
         let sentCount = 0;
-        let finalReply = '任务已完成。';
+        let finalReply = '';
         const payloads = result?.payloads || result?.result?.payloads || [];
 
         for (const p of payloads) {
             if (p.text) {
-                // 使用 callbackSessionId 进行回调路由（包含消息类型和目标 chat_id）
-                console.log(`[${new Date().toISOString()}] Routing callback to: ${callbackSessionId}`);
-                sendCallback(callbackSessionId, p.text);
-                sentCount++;
-                finalReply = p.text;
+                finalReply += p.text + '\n';
             }
+        }
+        finalReply = finalReply.trim();
+
+        // [拦截机制] 检测是否包含需要 Python agent.py 处理的后台指令
+        const hasInternalCommand = finalReply.includes('[Search:') || finalReply.includes('[Clawdbot:');
+
+        if (finalReply && !hasInternalCommand) {
+            // 使用 callbackSessionId 进行回调路由（包含消息类型和目标 chat_id）
+            console.log(`[${new Date().toISOString()}] Routing callback to: ${callbackSessionId}`);
+            sendCallback(callbackSessionId, finalReply);
+            sentCount++;
+        } else if (hasInternalCommand) {
+            console.log(`[${new Date().toISOString()}] Detected internal command, skipping callback: ${finalReply.substring(0, 50)}...`);
         }
 
         res.json({
-            reply: finalReply,
+            reply: finalReply || '任务已完成。',
             segments_sent: sentCount,
-            is_callback_mode: sentCount > 0,
+            is_callback_mode: sentCount > 0, // 仅当成功发出 callback 时才视为 callback 模式
             latency_ms: totalLatency,
             mode: 'websocket',
         });
