@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # OpenCode 服务（工程师角色）
+  # 自定义实现，支持 Gemini API 和 AI 意图分析
+  opencode_service:
+    build:
+      context: ./opencode
+      dockerfile: Dockerfile
+    container_name: clawdbot_opencode
+    restart: always
+    env_file:
+      - .env.opencode
+    environment:
+      - OPENCODE_HOST=0.0.0.0
+      - OPENCODE_PORT=8082
+      - PORT=8082
+      - OPENCODE_DEBUG=false
+      - LOG_LEVEL=INFO
+    ports:
+      - "8082:8082"
+    volumes:
+      - opencode_data:/app/data
+      - ./opencode_logs:/app/logs
+    networks:
+      - clawdbot_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # Clawdbot 服务（项目经理角色）
+  # 负责用户交互、消息处理、转发请求给 OpenCode
+  clawdbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: clawdbot_gemini
+    restart: always
+    privileged: true
+    env_file:
+      - .env
+    environment:
+      - OPENCODE_API_BASE_URL=http://opencode_service:8082/v1
+      - OPENCODE_API_KEY=${OPENCODE_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-${GOOGLE_API_KEY}}
+      - OPENROUTER_API_BASE_URL=http://opencode_service:8082/v1
+      - LOG_LEVEL=INFO
+      - APP_PORT=8081
+      - QQ_BOT_ENABLED=true
+      - QQ_HOST=napcatqq
+      - QQ_HTTP_PORT=3000
+      - QQ_WS_PORT=8080
+      - OCR_ENABLED=${OCR_ENABLED:-true}
+      - TZ=Asia/Shanghai
+    ports:
+      - "8081:8081"
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - ./SOUL.md:/app/SOUL.md
+      - ./memories:/app/memories
+      - opencode_data:/app/opencode_data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      opencode_service:
+        condition: service_started
+      clawdbot_wrapper:
+        condition: service_started
+    networks:
+      - clawdbot_network
+      - napcat_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  clawdbot_wrapper:
+    image: node:18-slim
+    working_dir: /app
+    volumes:
+      - ./clawdbot_http_wrapper.js:/app/server.js
+      - ./opencode/package.json:/app/package.json
+      # 挂载 .clawdbot 目录以读取 Gateway token
+      - ~/.clawdbot:/root/.clawdbot
+    command: sh -c "npm install express ws body-parser cors node-fetch && node server.js"
+    environment:
+      - PORT=3009
+      - GATEWAY_URL=ws://127.0.0.1:18789
+    network_mode: "host"
+    restart: always
+
+networks:
+  clawdbot_network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+  napcat_network:
+    external: true
+    name: clawdbot-gemini_default
+
+
+volumes:
+  opencode_data:
+  opencode_logs:

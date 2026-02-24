@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+websockets>=10.0
+lark-oapi
+python-dotenv
+openai
+requests
+redis
+pydantic-settings
+docker
+aiohttp
+google-genai
+duckduckgo-search
+beautifulsoup4

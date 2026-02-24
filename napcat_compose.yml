@@ -1,0 +1,20 @@
+version: '3.8'
+services:
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcatqq
+    ports:
+      - "3051:3000"
+      - "8080:8080"
+      - "6099:6099"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./qq_config:/app/.config/QQ
+      - ./napcat_config:/app/napcat/config
+    restart: unless-stopped
+    environment:
+      - NAPCAT_QQ_ACCOUNT=${NAPCAT_QQ:-"2745708378"}
+      - NAPCAT_ACCESS_TOKEN=${NAPCAT_TOKEN:-""}
+      - NAPCAT_HTTP_PORT=3000
+      - NAPCAT_WS_PORT=8080

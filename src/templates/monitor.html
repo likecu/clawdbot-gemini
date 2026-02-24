@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clawdbot QQ 实时监控</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #1a1a1a;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 10px;
+        }
+
+        #message-log {
+            height: 500px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            padding: 10px;
+            background-color: #fafafa;
+            border-radius: 4px;
+        }
+
+        .message-item {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            background-color: white;
+            border: 1px solid #eee;
+        }
+
+        .message-item.sent {
+            background-color: #e3f2fd;
+            border-color: #bbdefb;
+            margin-left: 20px;
+        }
+
+        .message-item.received {
+            background-color: #f1f8e9;
+            border-color: #dcedc8;
+            margin-right: 20px;
+        }
+
+        .timestamp {
+            font-size: 0.8em;
+            color: #888;
+            margin-bottom: 4px;
+        }
+
+        .content {
+            font-size: 1em;
+            color: #333;
+        }
+
+        .meta {
+            font-size: 0.85em;
+            color: #666;
+            margin-bottom: 4px;
+            font-weight: bold;
+        }
+
+        #status {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .connected {
+            color: green;
+        }
+
+        .disconnected {
+            color: red;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Clawdbot QQ 实时监控</h1>
+        <div id="status">状态: <span id="connection-status" class="disconnected">未连接</span></div>
+        <div
+            style="margin-top: 10px; padding: 10px; background-color: #e3f2fd; border-radius: 4px; border: 1px solid #bbdefb;">
+            <strong>提示：</strong> 如果上方二维码刷新缓慢，请尝试使用更流畅的官方 WebUI：<br>
+            <a id="webui-link" href="#" target="_blank"
+                style="color: #0277bd; text-decoration: underline; font-weight: bold;">打开 NapCat WebUI</a>
+            <span style="color: #555; font-size: 0.9em; margin-left: 10px;">Token: <code>b1e03dea5754</code></span>
+            <script>
+                document.getElementById('webui-link').href = "//" + window.location.hostname + ":6099/webui";
+            </script>
+        </div>
+        <div id="qr-container" style="display:none; margin: 20px auto; width: 256px;"></div>
+        <div id="message-log">
+            <!-- 消息将在这里显示 -->
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script>
+        const messageLog = document.getElementById('message-log');
+        const statusSpan = document.getElementById('connection-status');
+        let ws;
+        let pollingInterval;
+        let isLoggedIn = false;
+
+        // Status polling
+        async function checkStatus() {
+            try {
+                const response = await fetch('/api/qq/status');
+                const data = await response.json();
+
+                if (data.status === 'logged_in') {
+                    if (!isLoggedIn) {
+                        isLoggedIn = true;
+                        hideQRCode();
+                        statusSpan.textContent = `已登录 (QQ: ${data.data.data.user_id})`;
+                        statusSpan.className = 'connected';
+                        // Fetch latest after login if needed
+                        fetch('/api/qq/fetch_latest', { method: 'POST' });
+                    }
+                } else if (data.status === 'qr_code_available') {
+                    isLoggedIn = false;
+                    statusSpan.textContent = '等待扫码登录';
+                    statusSpan.className = 'disconnected';
+                    showQRCode();
+                } else {
+                    isLoggedIn = false;
+                    statusSpan.textContent = '未登录 (无二维码)';
+                    statusSpan.className = 'disconnected';
+                }
+            } catch (e) {
+                console.error("Status check failed", e);
+            }
+        }
+
+        async function showQRCode() {
+            const qrContainer = document.getElementById('qr-container');
+            const statusDiv = document.getElementById('status');
+
+            // Add refresh button if not exists
+            if (!document.getElementById('refresh-btn')) {
+                const btn = document.createElement('button');
+                btn.id = 'refresh-btn';
+                btn.textContent = '刷新二维码';
+                btn.onclick = refreshQR;
+                btn.style.marginLeft = '10px';
+                btn.style.padding = '5px 10px';
+                btn.style.cursor = 'pointer';
+                statusDiv.appendChild(btn);
+            }
+
+            if (qrContainer.innerHTML !== "") return; // Already showing
+
+            try {
+                const response = await fetch('/api/qq/qr');
+                const data = await response.json();
+                if (data.url) {
+                    new QRCode(qrContainer, data.url);
+                    qrContainer.style.display = 'block';
+                }
+            } catch (e) {
+                console.error("Failed to get QR", e);
+            }
+        }
+
+        async function refreshQR() {
+            if (!confirm("确定要刷新二维码吗？这将重启QQ服务")) return;
+
+            const btn = document.getElementById('refresh-btn');
+            btn.disabled = true;
+            btn.textContent = '刷新中...';
+
+            try {
+                const response = await fetch('/api/qq/refresh_qr', { method: 'POST' });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    alert('刷新请求已发送，请等待几秒钟');
+                    hideQRCode(); // Hide old QR
+                } else {
+                    alert('刷新失败: ' + (data.detail || '未知错误'));
+                }
+            } catch (e) {
+                alert('请求失败');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '刷新二维码';
+            }
+        }
+
+        function hideQRCode() {
+            const qrContainer = document.getElementById('qr-container');
+            qrContainer.innerHTML = "";
+            qrContainer.style.display = 'none';
+        }
+
+        // Poll status every 3 seconds
+        setInterval(checkStatus, 3000);
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/monitor`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function () {
+                // connection status handled by polling somewhat, or we can use this for WS status
+                console.log('Connected to WebSocket');
+            };
+
+            ws.onmessage = function (event) {
+                const data = JSON.parse(event.data);
+                appendMessage(data);
+            };
+
+            ws.onclose = function () {
+                setTimeout(connect, 3000);
+            };
+        }
+
+        function appendMessage(data) {
+            const div = document.createElement('div');
+            div.className = `message-item ${data.direction}`;
+
+            const time = new Date().toLocaleTimeString();
+            const platform = data.platform.toUpperCase();
+            const user = data.user_id || 'Unknown';
+            const label = data.direction === 'received' ? `[${platform}] From ${user}` : `[${platform}] To ${user}`;
+
+            div.innerHTML = `
+                <div class="timestamp">${time}</div>
+                <div class="meta">${label}</div>
+                <div class="content">${escapeHtml(data.content)}</div>
+            `;
+
+            messageLog.appendChild(div);
+            messageLog.scrollTop = messageLog.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initialize connection
+        connect();
+        checkStatus(); // Initial check
+    </script>
+</body>
+
+</html>
