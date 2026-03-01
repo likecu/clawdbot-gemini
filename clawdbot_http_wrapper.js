@@ -423,7 +423,6 @@ app.post('/chat', async (req, res) => {
             channel: 'webchat',
             timeout: 180,
             idempotencyKey,
-            local: true,
         }, { expectFinal: true });
 
         const totalLatency = Date.now() - startTime;
