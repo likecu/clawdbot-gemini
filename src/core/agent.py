@@ -175,10 +175,16 @@ class Agent:
             
             # [DuckDuckGo Native Search Integration]
             import re
-            search_match = re.search(r'\[Search:\s*(.*?)\]', response["text"], re.IGNORECASE | re.DOTALL)
-            if search_match:
+            max_search_iterations = 3
+            search_iterations = 0
+            
+            while search_iterations < max_search_iterations:
+                search_match = re.search(r'\[Search:\s*(.*?)\]', response["text"], re.IGNORECASE | re.DOTALL)
+                if not search_match:
+                    break
+                    
                 query = search_match.group(1).strip()
-                self.logger.info(f"Detected Native Search intent, query: {query}")
+                self.logger.info(f"Detected Native Search intent, query: {query} (Iteration {search_iterations + 1})")
                 
                 target_session_id = callback_session_id or session_id
                 if self.notification_callback:
@@ -191,7 +197,7 @@ class Agent:
                 from core.tools.duckduckgo_search import search_web_duckduckgo
                 search_results = await search_web_duckduckgo(query, max_results=4)
                 
-                observation = f"系统执行搜索 '{query}' 得到如下结果：\n\n{search_results}\n\n请根据上述搜索结果回答用户的最初问题。如果搜索内容不足以回答，可如实告知。"
+                observation = f"系统执行搜索 '{query}' 得到如下结果：\n\n{search_results}\n\n请综合搜索结果继续回答用户的最初问题。如果你发现信息仍然不足，你可以继续使用 [Search: xxx] 进行搜索，或者直接回答用户。"
                 
                 # Append to messages array to continue the conversation in same context
                 prompt_messages.append({"role": "assistant", "content": response["text"]})
@@ -204,6 +210,15 @@ class Agent:
                 # Recall LLM
                 response = await self._call_llm(prompt_messages, mode)
                 self.logger.info(f"LLM Reply after DuckDuckGo search: {response['text'][:50]}...")
+                search_iterations += 1
+                
+            # If hit max iterations and still returns search string, clean it up
+            if search_iterations >= max_search_iterations:
+                remaining_search = re.search(r'\[Search:\s*(.*?)\]', response["text"], re.IGNORECASE | re.DOTALL)
+                if remaining_search:
+                    response["text"] = re.sub(r'\[Search:\s*(.*?)\]', '', response["text"], flags=re.IGNORECASE | re.DOTALL).strip()
+                    if not response["text"]:
+                        response["text"] = "（已完成全网搜索，但暂时缺乏直接关联答案。请尝试补充上下文后再次提问）"
             
             
             # [Clawdbot CLI Integration] 检测是否调用了 CLI 工具
