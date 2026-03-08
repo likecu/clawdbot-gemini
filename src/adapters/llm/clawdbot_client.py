@@ -103,12 +103,19 @@ class ClawdbotClient:
                         logger.info(f"Clawdbot 响应: is_callback={is_callback}, reply_length={len(reply_text)}")
                         
                         if is_callback:
-                            # 如果是回调模式，且最终回复是默认占位符，说明所有内容都已通过回调发出了
+                            # 修复：虽然是回调模式，但是如果有工具指令，仍然要返回给 Agent
+                            import re
+                            has_tool_command = bool(re.search(r'\[(Search|Clawdbot):\s*.*?\]', reply_text, re.IGNORECASE | re.DOTALL))
+                            
+                            # 如果是回调模式，且最终回复是默认占位符或空，说明无后续动作
                             if reply_text == "任务已完成。" or not reply_text:
                                 logger.info("所有响应已通过回调发送，忽略此占位符回复")
                                 return ""  # 返回空字符串，防止重复发送
                             
-                            # 如果是回调模式，假设内容已通过实时推送发送，此处不再返回文本
+                            if has_tool_command:
+                                logger.info(f"探测到内部工具调用，即便在回调模式也返回文本供 Agent 解析执行")
+                                return reply_text
+                                
                             logger.info(f"回调模式: 忽略HTTP响应文本 (长度: {len(reply_text)})，防止重复发送")
                             return ""  # 返回空字符串，防止重复发送
                         

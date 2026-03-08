@@ -435,11 +435,17 @@ app.post('/chat', async (req, res) => {
 
         for (const p of payloads) {
             if (p.text) {
-                // 使用 callbackSessionId 进行回调路由（包含消息类型和目标 chat_id）
-                console.log(`[${new Date().toISOString()}] Routing callback to: ${callbackSessionId}`);
-                sendCallback(callbackSessionId, p.text);
-                sentCount++;
-                finalReply = p.text;
+                // Strip out internal tool commands so user does not see them via callback
+                let cleanText = p.text.replace(/\[(?:Search|Clawdbot):\s*([\s\S]*?)\]/gi, '').trim();
+
+                if (cleanText) {
+                    // 使用 callbackSessionId 进行回调路由（包含消息类型和目标 chat_id）
+                    console.log(`[${new Date().toISOString()}] Routing callback to: ${callbackSessionId}`);
+                    sendCallback(callbackSessionId, cleanText);
+                    sentCount++;
+                }
+
+                finalReply = p.text; // Always keep the raw text in HTTP response for Python processing
             }
         }
 
