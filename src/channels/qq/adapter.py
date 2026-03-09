@@ -86,6 +86,11 @@ class QQChannel(BaseChannel):
             # Filter asterisks as requested by user
             cleaned_content = request.content.replace("*", "")
 
+            # 清理过多的省略号和单引号
+            cleaned_content = re.sub(r"['‘’]", "", cleaned_content)
+            # 将省略号和连续的句号替换为逗号或直接删除（这里替换为逗号稍微自然一点，或者波浪号）
+            cleaned_content = re.sub(r"\.{3,}|…+", "", cleaned_content)
+
             # 将连续多个换行符压缩为单个换行符，保持紧凑排版
             cleaned_content = re.sub(r'\n{2,}', '\n', cleaned_content)
             
